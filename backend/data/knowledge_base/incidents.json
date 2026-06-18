@@ -1,0 +1,15 @@
+[
+  {
+    "id": "kb_incident_db_pool_001",
+    "title": "Checkout API database connection pool exhaustion",
+    "source_type": "incident",
+    "content": "A previous checkout-api incident showed DatabaseConnectionTimeout errors, high db_connection_pool_usage, increased p95 latency, and elevated error_rate after deployment. Mitigation included reducing request pressure, checking pool configuration, and rolling back the deployment if the configuration change was unsafe."
+  },
+  {
+    "id": "kb_incident_payment_retry_001",
+    "title": "Payment retries amplified downstream timeout",
+    "source_type": "incident",
+    "content": "Payment retry storms can amplify database and network timeout symptoms. Check retry rate, queue lag, downstream latency, and circuit breaker status before increasing concurrency."
+  }
+]
+

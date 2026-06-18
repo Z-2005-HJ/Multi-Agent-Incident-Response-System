@@ -1,0 +1,20 @@
+{
+  "service": "checkout-api",
+  "error_rate": {
+    "before": 0.005,
+    "after": 0.12
+  },
+  "p95_latency_ms": {
+    "before": 230,
+    "after": 2400
+  },
+  "db_connection_pool_usage": {
+    "before": 0.45,
+    "after": 0.98
+  },
+  "throughput_rps": {
+    "before": 510,
+    "after": 470
+  }
+}
+

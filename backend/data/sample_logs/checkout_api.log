@@ -1,0 +1,6 @@
+2026-06-18T10:21:03Z ERROR checkout-api DatabaseConnectionTimeout while acquiring database connection
+2026-06-18T10:21:04Z ERROR checkout-api failed to acquire connection from pool
+2026-06-18T10:21:05Z WARN checkout-api retrying payment transaction
+2026-06-18T10:21:12Z ERROR checkout-api DatabaseConnectionTimeout after 3000ms
+2026-06-18T10:21:20Z INFO checkout-api request latency exceeded threshold
+

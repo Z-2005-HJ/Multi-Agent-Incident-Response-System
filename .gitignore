@@ -1,0 +1,9 @@
+.idea/
+.venv/
+.env
+backend/.env
+__pycache__/
+.pytest_cache/
+*.pyc
+backend/server.log
+backend/data/incidents.db

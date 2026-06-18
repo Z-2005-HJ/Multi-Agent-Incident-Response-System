@@ -1,0 +1,2 @@
+"""Incident report generation."""
+

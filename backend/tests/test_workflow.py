@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from app.graph.workflow import run_incident_workflow
+from app.schemas.incident import IncidentRequest
+
+
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+
+
+def sample_request() -> IncidentRequest:
+    logs = (DATA_DIR / "sample_logs" / "checkout_api.log").read_text(encoding="utf-8")
+    metrics = json.loads((DATA_DIR / "sample_metrics" / "checkout_api_metrics.json").read_text(encoding="utf-8"))
+    return IncidentRequest(
+        incident_id="inc_test_checkout_api",
+        service_name="checkout-api",
+        alert_description="Service checkout-api error rate increased from 0.5% to 12% after deployment.",
+        raw_logs=logs,
+        metrics=metrics,
+        time_window="2026-06-18T10:20:00Z/2026-06-18T10:30:00Z",
+    )
+
+
+def test_workflow_generates_report_with_evidence() -> None:
+    result = run_incident_workflow(sample_request())
+
+    assert result.workflow_status == "completed"
+    assert result.report.service_name == "checkout-api"
+    assert result.report.root_causes
+    assert result.report.root_causes[0].evidence
+    assert result.report.sources
+    assert "Incident Report" in result.markdown_report
+
+
+def test_high_risk_fix_requires_human_approval() -> None:
+    result = run_incident_workflow(sample_request())
+
+    assert result.report.human_approval_required is True
+    assert result.eval_report.risks
+
+
+def test_trace_contains_all_core_nodes() -> None:
+    result = run_incident_workflow(sample_request())
+    node_names = {event.node_name for event in result.trace_events if event.event_type == "node_end"}
+
+    assert {
+        "ingest_incident",
+        "log_analysis",
+        "metric_analysis",
+        "knowledge_retrieval",
+        "root_cause_analysis",
+        "fix_planning",
+        "review",
+        "final_report",
+        "eval_report",
+    }.issubset(node_names)
+
