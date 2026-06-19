@@ -66,6 +66,15 @@ def traced_node(
                 duration_ms=duration_ms,
                 execution_mode=agent_info.get("execution_mode"),
                 fallback_reason=agent_info.get("fallback_reason"),
+                llm_provider=agent_info.get("llm_provider"),
+                llm_model=agent_info.get("llm_model"),
+                prompt_tokens=agent_info.get("prompt_tokens"),
+                completion_tokens=agent_info.get("completion_tokens"),
+                total_tokens=agent_info.get("total_tokens"),
+                llm_latency_ms=agent_info.get("llm_latency_ms"),
+                llm_error_type=agent_info.get("llm_error_type"),
+                prompt_version=agent_info.get("prompt_version"),
+                privacy_mode=agent_info.get("privacy_mode"),
             )
             output["trace_events"] = existing_events + [start, end]
             return output
@@ -105,6 +114,20 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
             agent_scores[event.agent_name]["execution_mode"] = event.execution_mode
         if event.fallback_reason:
             agent_scores[event.agent_name]["fallback_reason"] = event.fallback_reason
+        for key in (
+            "llm_provider",
+            "llm_model",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "llm_latency_ms",
+            "llm_error_type",
+            "prompt_version",
+            "privacy_mode",
+        ):
+            value = getattr(event, key)
+            if value is not None:
+                agent_scores[event.agent_name][key] = value
 
     knowledge = state.get("knowledge_results")
     if knowledge:

@@ -66,3 +66,5 @@ def test_llm_execution_metadata_is_reported() -> None:
     assert execution["fix_planner"]["execution_mode"] == "rule_fallback"
     assert execution["reviewer"]["execution_mode"] == "rule_fallback"
     assert result.eval_report.agent_scores["root_cause_agent"]["execution_mode"] == "rule_fallback"
+    assert result.eval_report.agent_scores["root_cause_agent"]["privacy_mode"] == "strict"
+    assert "prompt_version" in result.eval_report.agent_scores["root_cause_agent"]

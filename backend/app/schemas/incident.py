@@ -124,6 +124,15 @@ class TraceEvent(BaseModel):
     duration_ms: int = 0
     execution_mode: Literal["rule", "llm", "rule_fallback", "system"] | None = None
     fallback_reason: str | None = None
+    llm_provider: str | None = None
+    llm_model: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    llm_latency_ms: int | None = None
+    llm_error_type: str | None = None
+    prompt_version: str | None = None
+    privacy_mode: str | None = None
     timestamp: datetime = Field(default_factory=utc_now)
 
 
@@ -145,3 +154,27 @@ class IncidentRunResult(BaseModel):
     eval_report: EvalReport
     trace_events: list[TraceEvent]
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentRunSummary(BaseModel):
+    incident_id: str
+    trace_id: str
+    status: str
+    service_name: str
+    severity: str
+    human_approval_required: bool
+    approval_status: str = "pending"
+    created_at: str | None = None
+
+
+class HumanApprovalRequest(BaseModel):
+    approved_by: str = "local-user"
+    note: str = ""
+
+
+class HumanApprovalResult(BaseModel):
+    incident_id: str
+    approval_status: Literal["approved", "rejected"]
+    approved_by: str
+    note: str
+    updated_at: str

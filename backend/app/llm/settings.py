@@ -30,6 +30,7 @@ class LLMSettings:
     api_key: str | None
     model: str | None
     timeout_seconds: float = 30.0
+    privacy_mode: str = "strict"
 
     @property
     def enabled(self) -> bool:
@@ -75,5 +76,5 @@ def get_llm_settings() -> LLMSettings:
         api_key=api_key,
         model=model,
         timeout_seconds=timeout_seconds,
+        privacy_mode=(_first_env("LLM_PRIVACY_MODE") or "strict").strip().lower(),
     )
-

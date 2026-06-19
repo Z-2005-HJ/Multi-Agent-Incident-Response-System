@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
+
+from app.llm.client import LLMError, OpenAICompatibleClient
+from app.llm.settings import get_llm_settings
+from app.prompts.loader import load_prompt, prompt_version
 from app.schemas.incident import (
     KnowledgeResults,
     LogAnalysis,
@@ -7,27 +12,44 @@ from app.schemas.incident import (
     RootCauseAnalysis,
     RootCauseHypothesis,
 )
-from app.llm.client import LLMError, OpenAICompatibleClient
 from pydantic import ValidationError
 
 
-ROOT_CAUSE_SYSTEM_PROMPT = """You are a senior SRE root cause analyst.
-Return JSON only. Do not include markdown.
-The JSON object must match this shape:
-{
-  "root_cause_hypotheses": [
-    {
-      "cause": "short evidence-backed cause",
-      "status": "confirmed|likely|possible",
-      "confidence": 0.0,
-      "evidence": ["evidence item"]
+def _llm_metadata(client: OpenAICompatibleClient, prompt_name: str) -> dict[str, Any]:
+    metadata = dict(client.last_call_metadata)
+    metadata["prompt_version"] = prompt_version(prompt_name)
+    metadata["privacy_mode"] = get_llm_settings().privacy_mode
+    return metadata
+
+
+def _root_cause_payload(
+    log_analysis: LogAnalysis,
+    metric_analysis: MetricAnalysis,
+    knowledge_results: KnowledgeResults,
+) -> dict[str, Any]:
+    settings = get_llm_settings()
+    if settings.privacy_mode == "strict":
+        return {
+            "privacy_mode": "strict",
+            "log_analysis": {
+                "error_patterns": log_analysis.error_patterns,
+                "suspected_components": log_analysis.suspected_components,
+                "log_confidence": log_analysis.log_confidence,
+                "important_log_line_count": len(log_analysis.important_log_lines),
+            },
+            "metric_analysis": metric_analysis.model_dump(mode="json"),
+            "knowledge_results": {
+                "known_failure_modes": knowledge_results.known_failure_modes,
+                "source_references": knowledge_results.source_references,
+                "retrieval_confidence": knowledge_results.retrieval_confidence,
+            },
+        }
+    return {
+        "privacy_mode": settings.privacy_mode,
+        "log_analysis": log_analysis.model_dump(mode="json"),
+        "metric_analysis": metric_analysis.model_dump(mode="json"),
+        "knowledge_results": knowledge_results.model_dump(mode="json"),
     }
-  ],
-  "evidence_map": {"cause text": ["evidence item"]},
-  "confidence": 0.0,
-  "missing_information": ["missing item"]
-}
-Use only the provided evidence. Do not invent production actions or facts."""
 
 
 def infer_root_cause(
@@ -43,16 +65,23 @@ def infer_root_cause_with_metadata(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-) -> tuple[RootCauseAnalysis, dict[str, str | None]]:
+) -> tuple[RootCauseAnalysis, dict[str, Any]]:
     try:
-        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results), {
+        client = OpenAICompatibleClient()
+        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results, client=client), {
             "execution_mode": "llm",
             "fallback_reason": None,
+            **_llm_metadata(client, "root_cause.md"),
         }
     except (LLMError, ValidationError) as exc:
+        client = locals().get("client")
+        llm_error_metadata = dict(getattr(client, "last_call_metadata", {}))
         return infer_root_cause_rule(log_analysis, metric_analysis, knowledge_results), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
+            "privacy_mode": get_llm_settings().privacy_mode,
+            "prompt_version": prompt_version("root_cause.md"),
         }
 
 
@@ -66,14 +95,10 @@ def infer_root_cause_with_llm(
     if not llm.is_enabled():
         raise LLMError("LLM is disabled.")
 
-    payload = {
-        "log_analysis": log_analysis.model_dump(mode="json"),
-        "metric_analysis": metric_analysis.model_dump(mode="json"),
-        "knowledge_results": knowledge_results.model_dump(mode="json"),
-    }
+    payload = _root_cause_payload(log_analysis, metric_analysis, knowledge_results)
     data = llm.json_chat(
         [
-            {"role": "system", "content": ROOT_CAUSE_SYSTEM_PROMPT},
+            {"role": "system", "content": load_prompt("root_cause.md")},
             {"role": "user", "content": f"Analyze this incident evidence:\n{payload}"},
         ],
         temperature=0.1,

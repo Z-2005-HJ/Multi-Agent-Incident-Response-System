@@ -1169,6 +1169,7 @@ LLM_BASE_URL=https://example.com
 LLM_API_KEY=your_api_key
 LLM_MODEL=your_model_name
 LLM_TIMEOUT_SECONDS=30
+LLM_PRIVACY_MODE=strict
 ```
 
 如果配置了 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，系统会自动使用：
@@ -1192,6 +1193,28 @@ Reviewer Agent
 ```
 
 这些 agent 会优先调用真实 LLM，并在模型不可用、返回格式不符合 schema、请求超时等情况下自动回退到规则版逻辑。
+
+LLM 可观测性会记录：
+
+```text
+llm_provider
+llm_model
+prompt_tokens
+completion_tokens
+total_tokens
+llm_latency_ms
+llm_error_type
+prompt_version
+privacy_mode
+```
+
+`LLM_PRIVACY_MODE=strict` 时，发送给外部 LLM 的内容会裁剪为结构化信号：
+
+```text
+不发送 raw log 原文
+不发送 knowledge base 正文
+只发送 error pattern / suspected component / metric anomaly / source_id / known failure mode
+```
 
 验证 LLM 连通性：
 
@@ -1238,6 +1261,16 @@ GET /health
 POST /incidents/run
 ```
 
+历史记录与人工审批：
+
+```text
+GET /incidents
+GET /incidents/{incident_id}
+GET /incidents/{incident_id}/trace
+POST /incidents/{incident_id}/approve
+POST /incidents/{incident_id}/reject
+```
+
 启动前端：
 
 ```powershell
@@ -1261,4 +1294,26 @@ Trace 节点执行视图
 Eval Report 展示
 LLM provider 状态展示
 每个 LLM agent 的 execution_mode / fallback_reason 展示
+Incident Run History
+Human Approval approve / reject
+LLM token / latency / privacy mode 展示
+```
+
+Docker Compose 启动：
+
+```powershell
+docker compose up --build
+```
+
+如果本机 Docker 使用旧版 Compose 命令：
+
+```powershell
+docker-compose up --build
+```
+
+Docker 启动后：
+
+```text
+Backend: http://127.0.0.1:8000
+Frontend: http://127.0.0.1:5173
 ```

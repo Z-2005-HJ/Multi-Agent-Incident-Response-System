@@ -1,22 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.llm.client import LLMError, OpenAICompatibleClient
+from app.llm.settings import get_llm_settings
+from app.prompts.loader import load_prompt, prompt_version
 from app.schemas.incident import FixPlan, ReviewResult, RootCauseAnalysis
 from pydantic import ValidationError
 
 
-REVIEWER_SYSTEM_PROMPT = """You are a strict incident report reviewer.
-Return JSON only. Do not include markdown.
-The JSON object must match this shape:
-{
-  "approved": true,
-  "review_notes": ["note"],
-  "quality_score": 0.0,
-  "evidence_score": 0.0,
-  "safety_score": 0.0,
-  "required_revisions": ["revision"]
-}
-Approve only if root causes have evidence and high-risk actions require human approval."""
+def _llm_metadata(client: OpenAICompatibleClient, prompt_name: str) -> dict[str, Any]:
+    metadata = dict(client.last_call_metadata)
+    metadata["prompt_version"] = prompt_version(prompt_name)
+    metadata["privacy_mode"] = get_llm_settings().privacy_mode
+    return metadata
 
 
 def review(root_cause_analysis: RootCauseAnalysis, fix_plan: FixPlan) -> ReviewResult:
@@ -27,16 +24,23 @@ def review(root_cause_analysis: RootCauseAnalysis, fix_plan: FixPlan) -> ReviewR
 def review_with_metadata(
     root_cause_analysis: RootCauseAnalysis,
     fix_plan: FixPlan,
-) -> tuple[ReviewResult, dict[str, str | None]]:
+) -> tuple[ReviewResult, dict[str, Any]]:
     try:
-        return review_with_llm(root_cause_analysis, fix_plan), {
+        client = OpenAICompatibleClient()
+        return review_with_llm(root_cause_analysis, fix_plan, client=client), {
             "execution_mode": "llm",
             "fallback_reason": None,
+            **_llm_metadata(client, "reviewer.md"),
         }
     except (LLMError, ValidationError) as exc:
+        client = locals().get("client")
+        llm_error_metadata = dict(getattr(client, "last_call_metadata", {}))
         return review_rule(root_cause_analysis, fix_plan), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
+            "privacy_mode": get_llm_settings().privacy_mode,
+            "prompt_version": prompt_version("reviewer.md"),
         }
 
 
@@ -51,7 +55,7 @@ def review_with_llm(
 
     data = llm.json_chat(
         [
-            {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
+            {"role": "system", "content": load_prompt("reviewer.md")},
             {
                 "role": "user",
                 "content": (

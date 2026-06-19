@@ -375,6 +375,10 @@ li {
   line-height: 1.45;
 }
 
+.llm-row p svg {
+  vertical-align: -2px;
+}
+
 .score-table {
   display: grid;
   gap: 8px;
@@ -383,7 +387,7 @@ li {
 
 .score-row {
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) 120px 80px 70px;
+  grid-template-columns: minmax(160px, 1fr) 120px 80px 80px 70px;
   gap: 10px;
   align-items: center;
   min-height: 34px;
@@ -429,6 +433,76 @@ li {
   background: #fee4e2;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.history-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 48px;
+  padding: 9px 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  color: #344054;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-item.active {
+  border-color: #246bfe;
+  background: #eff6ff;
+}
+
+.history-item span,
+.history-empty {
+  color: #667085;
+  font-size: 12px;
+}
+
+.approval-note {
+  min-height: 72px;
+  margin-top: 10px;
+  font-family: inherit;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.approve-button,
+.reject-button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.approve-button {
+  background: #079455;
+}
+
+.reject-button {
+  background: #d92d20;
 }
 
 .empty-state {
@@ -505,4 +579,3 @@ li {
     justify-self: start;
   }
 }
-

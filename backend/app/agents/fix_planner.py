@@ -1,23 +1,19 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.llm.client import LLMError, OpenAICompatibleClient
+from app.llm.settings import get_llm_settings
+from app.prompts.loader import load_prompt, prompt_version
 from app.schemas.incident import FixPlan, RootCauseAnalysis
 from pydantic import ValidationError
 
 
-FIX_PLANNER_SYSTEM_PROMPT = """You are a cautious SRE fix planner.
-Return JSON only. Do not include markdown.
-The JSON object must match this shape:
-{
-  "diagnostic_steps": ["step"],
-  "recommended_actions": ["action"],
-  "rollback_plan": ["rollback step"],
-  "verification_steps": ["verification step"],
-  "risk_level": "low|medium|high",
-  "requires_human_approval": true
-}
-Never recommend executing real production commands automatically.
-Any rollback, database configuration change, restart, or data repair must require human approval."""
+def _llm_metadata(client: OpenAICompatibleClient, prompt_name: str) -> dict[str, Any]:
+    metadata = dict(client.last_call_metadata)
+    metadata["prompt_version"] = prompt_version(prompt_name)
+    metadata["privacy_mode"] = get_llm_settings().privacy_mode
+    return metadata
 
 
 def plan_fix(root_cause_analysis: RootCauseAnalysis) -> FixPlan:
@@ -25,16 +21,23 @@ def plan_fix(root_cause_analysis: RootCauseAnalysis) -> FixPlan:
     return result
 
 
-def plan_fix_with_metadata(root_cause_analysis: RootCauseAnalysis) -> tuple[FixPlan, dict[str, str | None]]:
+def plan_fix_with_metadata(root_cause_analysis: RootCauseAnalysis) -> tuple[FixPlan, dict[str, Any]]:
     try:
-        return plan_fix_with_llm(root_cause_analysis), {
+        client = OpenAICompatibleClient()
+        return plan_fix_with_llm(root_cause_analysis, client=client), {
             "execution_mode": "llm",
             "fallback_reason": None,
+            **_llm_metadata(client, "fix_planner.md"),
         }
     except (LLMError, ValidationError) as exc:
+        client = locals().get("client")
+        llm_error_metadata = dict(getattr(client, "last_call_metadata", {}))
         return plan_fix_rule(root_cause_analysis), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
+            "privacy_mode": get_llm_settings().privacy_mode,
+            "prompt_version": prompt_version("fix_planner.md"),
         }
 
 
@@ -48,7 +51,7 @@ def plan_fix_with_llm(
 
     data = llm.json_chat(
         [
-            {"role": "system", "content": FIX_PLANNER_SYSTEM_PROMPT},
+            {"role": "system", "content": load_prompt("fix_planner.md")},
             {
                 "role": "user",
                 "content": f"Create a safe fix plan for this root cause analysis:\n{root_cause_analysis.model_dump(mode='json')}",

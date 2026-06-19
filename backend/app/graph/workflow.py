@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
@@ -46,7 +47,7 @@ def knowledge_node(state: IncidentState) -> dict:
 def _with_agent_execution_metadata(
     state: IncidentState,
     agent_name: str,
-    execution_metadata: dict[str, str | None],
+    execution_metadata: dict[str, Any],
 ) -> dict:
     metadata = dict(state.get("metadata", {}))
     agent_execution = dict(metadata.get("agent_execution", {}))

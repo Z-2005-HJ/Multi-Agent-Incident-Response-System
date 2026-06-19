@@ -5,12 +5,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
+  Database,
   FileText,
+  Lock,
   Play,
   RefreshCw,
   Route,
   ShieldCheck,
   Terminal,
+  XCircle,
   Zap,
 } from "lucide-react";
 import "./styles.css";
@@ -32,6 +35,15 @@ type TraceEvent = {
   duration_ms: number;
   execution_mode?: "rule" | "llm" | "rule_fallback" | "system" | null;
   fallback_reason?: string | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  llm_latency_ms?: number | null;
+  llm_error_type?: string | null;
+  prompt_version?: string | null;
+  privacy_mode?: string | null;
   error?: string | null;
 };
 
@@ -73,8 +85,20 @@ type LLMStatus = {
   mode: string;
   enabled: boolean;
   model?: string | null;
+  privacy_mode: string;
   base_url_configured: boolean;
   api_key_configured: boolean;
+};
+
+type IncidentSummary = {
+  incident_id: string;
+  trace_id: string;
+  status: string;
+  service_name: string;
+  severity: string;
+  human_approval_required: boolean;
+  approval_status: string;
+  created_at?: string | null;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -110,6 +134,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("report");
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
+  const [history, setHistory] = useState<IncidentSummary[]>([]);
+  const [approvalNote, setApprovalNote] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,7 +149,15 @@ function App() {
       .then((response) => (response.ok ? response.json() : null))
       .then((payload: LLMStatus | null) => setLlmStatus(payload))
       .catch(() => setLlmStatus(null));
+    void loadHistory();
   }, []);
+
+  async function loadHistory() {
+    const response = await fetch(`${API_BASE}/incidents`);
+    if (response.ok) {
+      setHistory((await response.json()) as IncidentSummary[]);
+    }
+  }
 
   async function runAnalysis() {
     setIsRunning(true);
@@ -148,11 +182,37 @@ function App() {
       const payload = (await response.json()) as IncidentResult;
       setResult(payload);
       setActiveTab("report");
+      await loadHistory();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Request failed");
     } finally {
       setIsRunning(false);
     }
+  }
+
+  async function loadIncident(incidentId: string) {
+    const response = await fetch(`${API_BASE}/incidents/${incidentId}`);
+    if (!response.ok) {
+      setError(`Unable to load incident ${incidentId}`);
+      return;
+    }
+    setResult((await response.json()) as IncidentResult);
+    setActiveTab("report");
+  }
+
+  async function submitApproval(action: "approve" | "reject") {
+    if (!result) return;
+    const response = await fetch(`${API_BASE}/incidents/${result.incident_id}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved_by: "local-user", note: approvalNote }),
+    });
+    if (!response.ok) {
+      setError(`Unable to ${action} incident`);
+      return;
+    }
+    await loadHistory();
+    setApprovalNote("");
   }
 
   return (
@@ -205,6 +265,7 @@ function App() {
             <textarea value={metricsJson} onChange={(event) => setMetricsJson(event.target.value)} />
           </label>
           {error ? <div className="error-strip">{error}</div> : null}
+          <HistoryPanel items={history} selectedId={result?.incident_id} onSelect={loadIncident} />
         </form>
 
         <section className="output-panel">
@@ -218,7 +279,14 @@ function App() {
 
           <div className="tab-body">
             {!result ? <EmptyState /> : null}
-            {result && activeTab === "report" ? <ReportView result={result} /> : null}
+            {result && activeTab === "report" ? (
+              <ReportView
+                result={result}
+                approvalNote={approvalNote}
+                setApprovalNote={setApprovalNote}
+                onApproval={submitApproval}
+              />
+            ) : null}
             {result && activeTab === "trace" ? <TraceView events={nodeEnds} /> : null}
             {result && activeTab === "eval" ? <EvalView result={result} /> : null}
             {activeTab === "llm" ? <LLMView result={result} status={llmStatus} /> : null}
@@ -262,7 +330,53 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
   );
 }
 
-function ReportView({ result }: { result: IncidentResult }) {
+function HistoryPanel({
+  items,
+  selectedId,
+  onSelect,
+}: {
+  items: IncidentSummary[];
+  selectedId?: string;
+  onSelect: (incidentId: string) => void;
+}) {
+  return (
+    <section className="history-panel">
+      <div className="panel-heading">
+        <Database size={18} />
+        <h2>Run History</h2>
+      </div>
+      <div className="history-list">
+        {items.length ? (
+          items.map((item) => (
+            <button
+              className={item.incident_id === selectedId ? "history-item active" : "history-item"}
+              key={item.incident_id}
+              onClick={() => onSelect(item.incident_id)}
+              type="button"
+            >
+              <strong>{item.service_name}</strong>
+              <span>{item.severity} · {item.approval_status}</span>
+            </button>
+          ))
+        ) : (
+          <span className="history-empty">No saved runs</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ReportView({
+  result,
+  approvalNote,
+  setApprovalNote,
+  onApproval,
+}: {
+  result: IncidentResult;
+  approvalNote: string;
+  setApprovalNote: (value: string) => void;
+  onApproval: (action: "approve" | "reject") => void;
+}) {
   const report = result.report;
   return (
     <div className="report-grid">
@@ -294,6 +408,27 @@ function ReportView({ result }: { result: IncidentResult }) {
       <ListBlock title="Rollback" items={report.rollback_plan} />
       <ListBlock title="Verification" items={report.verification_steps} />
       <ListBlock title="Review" items={report.review_notes} />
+      {report.human_approval_required ? (
+        <section className="section-block wide">
+          <h3>Human Approval</h3>
+          <textarea
+            className="approval-note"
+            value={approvalNote}
+            onChange={(event) => setApprovalNote(event.target.value)}
+            placeholder="Approval note"
+          />
+          <div className="approval-actions">
+            <button className="approve-button" onClick={() => onApproval("approve")} title="Approve high-risk plan">
+              <CheckCircle2 size={16} />
+              <span>Approve</span>
+            </button>
+            <button className="reject-button" onClick={() => onApproval("reject")} title="Reject high-risk plan">
+              <XCircle size={16} />
+              <span>Reject</span>
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }
@@ -312,7 +447,7 @@ function TraceView({ events }: { events: TraceEvent[] }) {
             {event.fallback_reason ? <p>{event.fallback_reason}</p> : null}
           </div>
           <StatusPill label={event.execution_mode ?? "system"} tone={event.execution_mode === "llm" ? "ok" : event.execution_mode === "rule_fallback" ? "warn" : "muted"} />
-          <span className="duration">{event.duration_ms} ms</span>
+          <span className="duration">{event.llm_latency_ms ?? event.duration_ms} ms</span>
         </article>
       ))}
     </div>
@@ -330,7 +465,8 @@ function EvalView({ result }: { result: IncidentResult }) {
             <div className="score-row" key={agent}>
               <strong>{agent}</strong>
               <span>{String(score.execution_mode ?? "system")}</span>
-              <span>{String(score.duration_ms ?? 0)} ms</span>
+              <span>{String(score.llm_latency_ms ?? score.duration_ms ?? 0)} ms</span>
+              <span>{String(score.total_tokens ?? "-")} tok</span>
               <span>{score.schema_valid === false ? "invalid" : "valid"}</span>
             </div>
           ))}
@@ -350,6 +486,7 @@ function LLMView({ result, status }: { result: IncidentResult | null; status: LL
         <div>
           <strong>{status?.mode ?? "unknown"}</strong>
           <p>{status?.model ?? "model unavailable"}</p>
+          <p><Lock size={12} /> privacy: {status?.privacy_mode ?? "unknown"}</p>
         </div>
         <StatusPill label={status?.enabled ? "enabled" : "mock"} tone={status?.enabled ? "ok" : "muted"} />
       </article>
@@ -358,6 +495,11 @@ function LLMView({ result, status }: { result: IncidentResult | null; status: LL
           <div>
             <strong>{agent}</strong>
             {info.fallback_reason ? <p>{info.fallback_reason}</p> : null}
+            <p>
+              model: {String((info as Record<string, unknown>).llm_model ?? "-")} · tokens:{" "}
+              {String((info as Record<string, unknown>).total_tokens ?? "-")} · latency:{" "}
+              {String((info as Record<string, unknown>).llm_latency_ms ?? "-")} ms
+            </p>
           </div>
           <StatusPill label={info.execution_mode ?? "unknown"} tone={info.execution_mode === "llm" ? "ok" : "warn"} />
         </article>

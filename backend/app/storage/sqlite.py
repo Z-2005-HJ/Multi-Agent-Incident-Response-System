@@ -7,6 +7,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.schemas.incident import (
+    EvalReport,
+    HumanApprovalResult,
+    IncidentReport,
+    IncidentRunResult,
+    IncidentRunSummary,
+    TraceEvent,
+)
+
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[2] / "data" / "incidents.db"
 
@@ -44,10 +53,20 @@ class IncidentStore:
                     report_json TEXT NOT NULL,
                     eval_json TEXT NOT NULL,
                     markdown_report TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    approval_status TEXT NOT NULL DEFAULT 'pending',
+                    approved_by TEXT,
+                    approval_note TEXT,
+                    approval_updated_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            self._ensure_column(conn, "incident_runs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(conn, "incident_runs", "approval_status", "TEXT NOT NULL DEFAULT 'pending'")
+            self._ensure_column(conn, "incident_runs", "approved_by", "TEXT")
+            self._ensure_column(conn, "incident_runs", "approval_note", "TEXT")
+            self._ensure_column(conn, "incident_runs", "approval_updated_at", "TEXT")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS trace_events (
@@ -59,6 +78,11 @@ class IncidentStore:
                 )
                 """
             )
+
+    def _ensure_column(self, conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+        if column_name not in columns:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     def save_run(self, result: Any) -> None:
         try:
@@ -73,8 +97,8 @@ class IncidentStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO incident_runs
-                (incident_id, trace_id, status, report_json, eval_json, markdown_report)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (incident_id, trace_id, status, report_json, eval_json, markdown_report, metadata_json, approval_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     result.incident_id,
@@ -83,6 +107,8 @@ class IncidentStore:
                     json.dumps(result.report, default=_json_default, ensure_ascii=False),
                     json.dumps(result.eval_report, default=_json_default, ensure_ascii=False),
                     result.markdown_report,
+                    json.dumps(result.metadata, default=_json_default, ensure_ascii=False),
+                    "pending" if result.report.human_approval_required else "not_required",
                 ),
             )
             conn.execute("DELETE FROM trace_events WHERE incident_id = ?", (result.incident_id,))
@@ -100,3 +126,107 @@ class IncidentStore:
                     for event in result.trace_events
                 ],
             )
+
+    def list_runs(self, limit: int = 20) -> list[IncidentRunSummary]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT incident_id, trace_id, status, report_json, approval_status, created_at
+                FROM incident_runs
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        summaries: list[IncidentRunSummary] = []
+        for row in rows:
+            report = json.loads(row[3])
+            summaries.append(
+                IncidentRunSummary(
+                    incident_id=row[0],
+                    trace_id=row[1],
+                    status=row[2],
+                    service_name=report.get("service_name", ""),
+                    severity=report.get("severity", "unknown"),
+                    human_approval_required=bool(report.get("human_approval_required", False)),
+                    approval_status=row[4],
+                    created_at=row[5],
+                )
+            )
+        return summaries
+
+    def get_run(self, incident_id: str) -> IncidentRunResult | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT incident_id, trace_id, status, report_json, eval_json, markdown_report, metadata_json
+                FROM incident_runs
+                WHERE incident_id = ?
+                """,
+                (incident_id,),
+            ).fetchone()
+            trace_rows = conn.execute(
+                """
+                SELECT event_json
+                FROM trace_events
+                WHERE incident_id = ?
+                ORDER BY id ASC
+                """,
+                (incident_id,),
+            ).fetchall()
+        if row is None:
+            return None
+        return IncidentRunResult(
+            incident_id=row[0],
+            trace_id=row[1],
+            workflow_status=row[2],
+            report=IncidentReport.model_validate(json.loads(row[3])),
+            eval_report=EvalReport.model_validate(json.loads(row[4])),
+            markdown_report=row[5],
+            metadata=json.loads(row[6] or "{}"),
+            trace_events=[TraceEvent.model_validate(json.loads(item[0])) for item in trace_rows],
+        )
+
+    def get_trace(self, incident_id: str) -> list[TraceEvent] | None:
+        run = self.get_run(incident_id)
+        if run is None:
+            return None
+        return run.trace_events
+
+    def update_approval(
+        self,
+        incident_id: str,
+        approval_status: str,
+        approved_by: str,
+        note: str,
+    ) -> HumanApprovalResult | None:
+        with self._connect() as conn:
+            exists = conn.execute("SELECT incident_id FROM incident_runs WHERE incident_id = ?", (incident_id,)).fetchone()
+            if exists is None:
+                return None
+            conn.execute(
+                """
+                UPDATE incident_runs
+                SET approval_status = ?,
+                    approved_by = ?,
+                    approval_note = ?,
+                    approval_updated_at = CURRENT_TIMESTAMP
+                WHERE incident_id = ?
+                """,
+                (approval_status, approved_by, note, incident_id),
+            )
+            row = conn.execute(
+                """
+                SELECT incident_id, approval_status, approved_by, approval_note, approval_updated_at
+                FROM incident_runs
+                WHERE incident_id = ?
+                """,
+                (incident_id,),
+            ).fetchone()
+        return HumanApprovalResult(
+            incident_id=row[0],
+            approval_status=row[1],
+            approved_by=row[2] or "",
+            note=row[3] or "",
+            updated_at=row[4] or "",
+        )
