@@ -67,6 +67,7 @@ def test_workflow_includes_external_tool_context() -> None:
     assert result.tool_context.log_search_hits
     assert result.tool_context.deployment_events
     assert "prometheus_mock" in result.report.sources
+    assert result.tool_context.tool_sources["prometheus"] == "mock"
     assert result.eval_report.agent_scores["tool_adapter"]["prometheus_findings"] >= 1
 
 

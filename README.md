@@ -7,7 +7,7 @@
 - Multi-Agent workflow：基于 FastAPI + LangGraph，包含 Log Analyst、Metric Analyst、Knowledge Agent、Root Cause Agent、Fix Planner、Reviewer、Eval Adapter。
 - LLM 接入：支持 OpenAI-compatible API，可接正规厂商模型，也可接 API 中转站；严格隐私模式下默认不向外部 LLM 发送原始日志和完整知识库内容。
 - 真实向量 RAG：已选择 Chroma，使用本地持久化向量库 `backend/data/chroma/`，并配套 deterministic local embedding；Chroma 不可用时自动回退关键词检索。
-- 外部工具接入 mock：已实现 Prometheus 指标查询 mock、Loki/Elasticsearch 风格日志搜索 mock、Git 部署历史 mock；Slack / 飞书通知 mock 暂不实现。
+- 外部工具接入：已实现 Prometheus、Loki/Elasticsearch、GitHub commit history 的真实 HTTP client 配置层，并保留 mock fallback；Slack / 飞书通知 mock 暂不实现。
 - 可观测性：trace events、agent execution metadata、LLM token/latency/fallback 信息、RAG retrieval mode、tool result counts 都会进入 eval report。
 - Human-in-the-loop：高风险修复计划支持人工 approve/reject API 和前端操作。
 - 前端控制台：React + Vite + TypeScript，支持 incident 输入、报告、工具结果、trace、eval、LLM 状态、历史记录、人工审批。
@@ -1242,6 +1242,64 @@ privacy_mode
 ```powershell
 cd backend
 ..\.venv\Scripts\python.exe check_llm.py
+```
+
+### 16.2 External tools 配置
+
+外部工具采用 `real HTTP client -> mock fallback` 模式：
+
+```text
+已配置真实工具时：优先请求真实 Prometheus / Loki / Elasticsearch / GitHub
+真实请求失败时：记录 tool_errors，并回退到 mock 结果
+未配置真实工具时：直接使用 mock 结果，不视为错误
+```
+
+工具状态接口：
+
+```text
+GET /tools/status
+```
+
+基础配置：
+
+```env
+TOOL_MODE=auto
+TOOL_TIMEOUT_SECONDS=8
+```
+
+Prometheus：
+
+```env
+PROMETHEUS_BASE_URL=http://localhost:9090
+PROMETHEUS_BEARER_TOKEN=optional_token
+PROMETHEUS_QUERY_TEMPLATE={metric_name}{service="{service_name}"}
+```
+
+Loki：
+
+```env
+LOG_SEARCH_PROVIDER=loki
+LOKI_BASE_URL=http://localhost:3100
+LOKI_BEARER_TOKEN=optional_token
+LOKI_QUERY_TEMPLATE={service="{service_name}"} |= "ERROR"
+```
+
+Elasticsearch：
+
+```env
+LOG_SEARCH_PROVIDER=elasticsearch
+ELASTICSEARCH_BASE_URL=http://localhost:9200
+ELASTICSEARCH_API_KEY=optional_api_key
+ELASTICSEARCH_INDEX=logs-*
+```
+
+GitHub commit history：
+
+```env
+GITHUB_REPOSITORY=owner/repo
+GITHUB_TOKEN=optional_token
+GITHUB_BRANCH=main
+GITHUB_LOOKBACK_COMMITS=10
 ```
 
 安装依赖：

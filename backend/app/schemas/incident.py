@@ -95,6 +95,7 @@ class ExternalToolContext(BaseModel):
     prometheus_findings: list[PrometheusFinding] = Field(default_factory=list)
     log_search_hits: list[LogSearchHit] = Field(default_factory=list)
     deployment_events: list[DeploymentEvent] = Field(default_factory=list)
+    tool_sources: dict[str, str] = Field(default_factory=dict)
     tool_errors: list[str] = Field(default_factory=list)
 
 

@@ -39,18 +39,21 @@ def external_tools_node(state: IncidentState) -> dict:
     tool_context = collect_external_tool_context(state["request"])
     tool_calls = [
         {
-            "name": "prometheus_mock",
-            "status": "ok",
+            "name": "prometheus",
+            "source": tool_context.tool_sources.get("prometheus", "unknown"),
+            "status": "fallback" if tool_context.tool_sources.get("prometheus") == "mock_fallback" else "ok",
             "result_count": len(tool_context.prometheus_findings),
         },
         {
-            "name": "log_search_mock",
-            "status": "ok",
+            "name": "log_search",
+            "source": tool_context.tool_sources.get("log_search", "unknown"),
+            "status": "fallback" if tool_context.tool_sources.get("log_search") == "mock_fallback" else "ok",
             "result_count": len(tool_context.log_search_hits),
         },
         {
-            "name": "deployment_history_mock",
-            "status": "ok",
+            "name": "github",
+            "source": tool_context.tool_sources.get("github", "unknown"),
+            "status": "fallback" if tool_context.tool_sources.get("github") == "mock_fallback" else "ok",
             "result_count": len(tool_context.deployment_events),
         },
     ]
@@ -59,6 +62,7 @@ def external_tools_node(state: IncidentState) -> dict:
         "prometheus_findings": len(tool_context.prometheus_findings),
         "log_search_hits": len(tool_context.log_search_hits),
         "deployment_events": len(tool_context.deployment_events),
+        "tool_sources": tool_context.tool_sources,
         "tool_errors": tool_context.tool_errors,
     }
     metadata["tool_context"] = tool_context.model_dump(mode="json")
@@ -161,9 +165,21 @@ def final_report_node(state: IncidentState) -> dict:
         review_notes=review_result.review_notes,
         sources=[
             *knowledge_results.source_references,
-            *(["prometheus_mock"] if tool_context and tool_context.prometheus_findings else []),
-            *(["log_search_mock"] if tool_context and tool_context.log_search_hits else []),
-            *(["deployment_history_mock"] if tool_context and tool_context.deployment_events else []),
+            *(
+                [f"prometheus_{tool_context.tool_sources.get('prometheus', 'unknown')}"]
+                if tool_context and tool_context.prometheus_findings
+                else []
+            ),
+            *(
+                [f"log_search_{tool_context.tool_sources.get('log_search', 'unknown')}"]
+                if tool_context and tool_context.log_search_hits
+                else []
+            ),
+            *(
+                [f"github_{tool_context.tool_sources.get('github', 'unknown')}"]
+                if tool_context and tool_context.deployment_events
+                else []
+            ),
         ],
         human_approval_required=fix_plan.requires_human_approval,
     )

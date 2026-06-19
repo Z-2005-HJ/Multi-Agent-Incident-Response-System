@@ -105,6 +105,7 @@ type IncidentResult = {
       summary: string;
       risk_flags: string[];
     }>;
+    tool_sources: Record<string, string>;
     tool_errors: string[];
   } | null;
   metadata: {
@@ -518,6 +519,7 @@ function ToolsView({ result }: { result: IncidentResult }) {
     <div className="tools-layout">
       <section className="section-block wide">
         <h3>Prometheus</h3>
+        <ToolSource value={tools?.tool_sources.prometheus} />
         <div className="tool-list">
           {(tools?.prometheus_findings.length ? tools.prometheus_findings : []).map((item) => (
             <article className="tool-item" key={item.metric_name}>
@@ -534,6 +536,7 @@ function ToolsView({ result }: { result: IncidentResult }) {
       </section>
       <section className="section-block">
         <h3>Log Search</h3>
+        <ToolSource value={tools?.tool_sources.log_search} />
         <div className="tool-list">
           {(tools?.log_search_hits.length ? tools.log_search_hits : []).map((item) => (
             <article className="tool-item compact" key={`${item.timestamp}-${item.message}`}>
@@ -547,6 +550,7 @@ function ToolsView({ result }: { result: IncidentResult }) {
       </section>
       <section className="section-block">
         <h3>Deployments</h3>
+        <ToolSource value={tools?.tool_sources.github} />
         <div className="tool-list">
           {(tools?.deployment_events.length ? tools.deployment_events : []).map((item) => (
             <article className="tool-item compact" key={item.commit_sha}>
@@ -561,6 +565,10 @@ function ToolsView({ result }: { result: IncidentResult }) {
       {tools?.tool_errors.length ? <ListBlock title="Tool Errors" items={tools.tool_errors} /> : null}
     </div>
   );
+}
+
+function ToolSource({ value }: { value?: string }) {
+  return <span className="tool-source">source: {value ?? "unknown"}</span>;
 }
 
 function LLMView({ result, status }: { result: IncidentResult | null; status: LLMStatus | null }) {

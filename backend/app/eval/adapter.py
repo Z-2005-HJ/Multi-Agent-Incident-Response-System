@@ -146,6 +146,7 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
         agent_scores.setdefault("tool_adapter", {})["prometheus_findings"] = len(tool_context.prometheus_findings)
         agent_scores["tool_adapter"]["log_search_hits"] = len(tool_context.log_search_hits)
         agent_scores["tool_adapter"]["deployment_events"] = len(tool_context.deployment_events)
+        agent_scores["tool_adapter"]["tool_sources"] = tool_context.tool_sources
         agent_scores["tool_adapter"]["tool_errors"] = tool_context.tool_errors
 
     root = state.get("root_cause_analysis")

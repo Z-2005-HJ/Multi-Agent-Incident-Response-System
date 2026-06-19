@@ -47,6 +47,20 @@ def test_llm_status_does_not_expose_api_key() -> None:
     assert payload["privacy_mode"] == "strict"
 
 
+def test_tools_status_does_not_expose_tokens() -> None:
+    client = TestClient(app)
+
+    response = client.get("/tools/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    serialized = json.dumps(payload)
+    assert "api_key" not in serialized.lower()
+    assert "token_configured" in serialized
+    assert "prometheus" in payload
+    assert "github" in payload
+
+
 def test_history_trace_and_approval_api() -> None:
     client = TestClient(app)
     logs = (DATA_DIR / "sample_logs" / "checkout_api.log").read_text(encoding="utf-8")

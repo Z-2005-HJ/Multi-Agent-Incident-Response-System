@@ -348,9 +348,15 @@ li {
 }
 
 .tool-item span,
-.tool-item code {
+.tool-item code,
+.tool-source {
   color: #667085;
   font-size: 12px;
+}
+
+.tool-source {
+  display: inline-block;
+  margin-top: 8px;
 }
 
 .tool-item code {

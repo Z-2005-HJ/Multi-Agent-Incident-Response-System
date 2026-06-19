@@ -13,6 +13,7 @@ from app.schemas.incident import (
     TraceEvent,
 )
 from app.storage.sqlite import IncidentStore
+from app.tools.settings import get_tool_settings
 
 
 router = APIRouter()
@@ -34,6 +35,34 @@ def llm_status() -> dict[str, object]:
         "privacy_mode": settings.privacy_mode,
         "base_url_configured": bool(settings.base_url),
         "api_key_configured": bool(settings.api_key),
+    }
+
+
+@router.get("/tools/status")
+def tools_status() -> dict[str, object]:
+    settings = get_tool_settings()
+    return {
+        "mode": settings.mode,
+        "timeout_seconds": settings.timeout_seconds,
+        "prometheus": {
+            "configured": settings.prometheus_enabled,
+            "base_url_configured": bool(settings.prometheus_base_url),
+            "token_configured": bool(settings.prometheus_bearer_token),
+        },
+        "log_search": {
+            "provider": settings.log_search_provider,
+            "loki_configured": settings.loki_enabled,
+            "elasticsearch_configured": settings.elasticsearch_enabled,
+            "loki_base_url_configured": bool(settings.loki_base_url),
+            "elasticsearch_base_url_configured": bool(settings.elasticsearch_base_url),
+            "token_configured": bool(settings.loki_bearer_token or settings.elasticsearch_api_key),
+        },
+        "github": {
+            "configured": settings.github_enabled,
+            "repository": settings.github_repository,
+            "branch": settings.github_branch,
+            "token_configured": bool(settings.github_token),
+        },
     }
 
 
