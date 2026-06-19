@@ -1152,6 +1152,54 @@ Markdown Report
 pytest 测试
 ```
 
+### 16.1 LLM 配置
+
+项目支持 OpenAI-compatible API provider。可以接正规云厂商，也可以接兼容 OpenAI Chat Completions 协议的 API provider。
+
+本地配置放在：
+
+```text
+backend/.env
+```
+
+示例：
+
+```env
+LLM_BASE_URL=https://example.com
+LLM_API_KEY=your_api_key
+LLM_MODEL=your_model_name
+LLM_TIMEOUT_SECONDS=30
+```
+
+如果配置了 `LLM_BASE_URL`、`LLM_API_KEY` 和 `LLM_MODEL`，系统会自动使用：
+
+```text
+LLM_MODE=openai_compatible
+```
+
+如果没有配置真实模型，系统会回退到：
+
+```text
+LLM_MODE=mock
+```
+
+当前接入大模型的 agent：
+
+```text
+Root Cause Agent
+Fix Planner Agent
+Reviewer Agent
+```
+
+这些 agent 会优先调用真实 LLM，并在模型不可用、返回格式不符合 schema、请求超时等情况下自动回退到规则版逻辑。
+
+验证 LLM 连通性：
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe check_llm.py
+```
+
 安装依赖：
 
 ```powershell
