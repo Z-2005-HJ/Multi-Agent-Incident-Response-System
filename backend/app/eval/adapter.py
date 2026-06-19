@@ -30,6 +30,7 @@ def state_snapshot(state: IncidentState) -> dict[str, Any]:
         "root_cause_analysis",
         "fix_plan",
         "review_result",
+        "metadata",
     ]
     return {key: _jsonable(state[key]) for key in keys if key in state}
 
@@ -53,6 +54,8 @@ def traced_node(
         try:
             output = handler(state)
             duration_ms = int((time.perf_counter() - started_at) * 1000)
+            metadata = output.get("metadata", state.get("metadata", {}))
+            agent_info = metadata.get("agent_execution", {}).get(agent_name, {})
             end = TraceEvent(
                 trace_id=trace_id,
                 node_name=node_name,
@@ -61,6 +64,8 @@ def traced_node(
                 output_snapshot=_jsonable(output),
                 state_diff=_jsonable(output),
                 duration_ms=duration_ms,
+                execution_mode=agent_info.get("execution_mode"),
+                fallback_reason=agent_info.get("fallback_reason"),
             )
             output["trace_events"] = existing_events + [start, end]
             return output
@@ -96,6 +101,10 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
             "schema_valid": schema_valid,
             "duration_ms": event.duration_ms,
         }
+        if event.execution_mode:
+            agent_scores[event.agent_name]["execution_mode"] = event.execution_mode
+        if event.fallback_reason:
+            agent_scores[event.agent_name]["fallback_reason"] = event.fallback_reason
 
     knowledge = state.get("knowledge_results")
     if knowledge:
@@ -129,4 +138,3 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
         risks=risks,
         recommendations=recommendations,
     )
-

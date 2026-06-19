@@ -57,3 +57,12 @@ def test_trace_contains_all_core_nodes() -> None:
         "eval_report",
     }.issubset(node_names)
 
+
+def test_llm_execution_metadata_is_reported() -> None:
+    result = run_incident_workflow(sample_request())
+    execution = result.metadata["agent_execution"]
+
+    assert execution["root_cause_agent"]["execution_mode"] == "rule_fallback"
+    assert execution["fix_planner"]["execution_mode"] == "rule_fallback"
+    assert execution["reviewer"]["execution_mode"] == "rule_fallback"
+    assert result.eval_report.agent_scores["root_cause_agent"]["execution_mode"] == "rule_fallback"

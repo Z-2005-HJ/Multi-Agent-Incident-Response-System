@@ -20,10 +20,24 @@ Approve only if root causes have evidence and high-risk actions require human ap
 
 
 def review(root_cause_analysis: RootCauseAnalysis, fix_plan: FixPlan) -> ReviewResult:
+    result, _metadata = review_with_metadata(root_cause_analysis, fix_plan)
+    return result
+
+
+def review_with_metadata(
+    root_cause_analysis: RootCauseAnalysis,
+    fix_plan: FixPlan,
+) -> tuple[ReviewResult, dict[str, str | None]]:
     try:
-        return review_with_llm(root_cause_analysis, fix_plan)
-    except (LLMError, ValidationError):
-        return review_rule(root_cause_analysis, fix_plan)
+        return review_with_llm(root_cause_analysis, fix_plan), {
+            "execution_mode": "llm",
+            "fallback_reason": None,
+        }
+    except (LLMError, ValidationError) as exc:
+        return review_rule(root_cause_analysis, fix_plan), {
+            "execution_mode": "rule_fallback",
+            "fallback_reason": str(exc),
+        }
 
 
 def review_with_llm(

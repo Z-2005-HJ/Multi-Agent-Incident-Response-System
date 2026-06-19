@@ -34,3 +34,13 @@ def test_run_incident_api() -> None:
     assert payload["report"]["human_approval_required"] is True
     assert payload["eval_report"]["agent_scores"]
 
+
+def test_llm_status_does_not_expose_api_key() -> None:
+    client = TestClient(app)
+
+    response = client.get("/llm/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "api_key" not in payload
+    assert payload["mode"] == "mock"

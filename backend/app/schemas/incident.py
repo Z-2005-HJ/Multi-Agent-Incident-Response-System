@@ -122,6 +122,8 @@ class TraceEvent(BaseModel):
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
     duration_ms: int = 0
+    execution_mode: Literal["rule", "llm", "rule_fallback", "system"] | None = None
+    fallback_reason: str | None = None
     timestamp: datetime = Field(default_factory=utc_now)
 
 
@@ -142,4 +144,4 @@ class IncidentRunResult(BaseModel):
     markdown_report: str
     eval_report: EvalReport
     trace_events: list[TraceEvent]
-
+    metadata: dict[str, Any] = Field(default_factory=dict)

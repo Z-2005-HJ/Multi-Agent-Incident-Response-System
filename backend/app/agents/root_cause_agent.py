@@ -35,10 +35,25 @@ def infer_root_cause(
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
 ) -> RootCauseAnalysis:
+    result, _metadata = infer_root_cause_with_metadata(log_analysis, metric_analysis, knowledge_results)
+    return result
+
+
+def infer_root_cause_with_metadata(
+    log_analysis: LogAnalysis,
+    metric_analysis: MetricAnalysis,
+    knowledge_results: KnowledgeResults,
+) -> tuple[RootCauseAnalysis, dict[str, str | None]]:
     try:
-        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results)
-    except (LLMError, ValidationError):
-        return infer_root_cause_rule(log_analysis, metric_analysis, knowledge_results)
+        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results), {
+            "execution_mode": "llm",
+            "fallback_reason": None,
+        }
+    except (LLMError, ValidationError) as exc:
+        return infer_root_cause_rule(log_analysis, metric_analysis, knowledge_results), {
+            "execution_mode": "rule_fallback",
+            "fallback_reason": str(exc),
+        }
 
 
 def infer_root_cause_with_llm(

@@ -33,4 +33,3 @@ class IncidentState(TypedDict, total=False):
     errors: list[str]
     status: str
     metadata: dict[str, Any]
-

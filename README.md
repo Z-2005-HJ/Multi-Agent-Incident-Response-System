@@ -1237,3 +1237,28 @@ GET /health
 ```text
 POST /incidents/run
 ```
+
+启动前端：
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+前端地址：
+
+```text
+http://127.0.0.1:5173
+```
+
+前端当前包含：
+
+```text
+Incident 输入表单
+Incident Report 展示
+Trace 节点执行视图
+Eval Report 展示
+LLM provider 状态展示
+每个 LLM agent 的 execution_mode / fallback_reason 展示
+```

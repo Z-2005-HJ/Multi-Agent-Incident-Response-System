@@ -21,10 +21,21 @@ Any rollback, database configuration change, restart, or data repair must requir
 
 
 def plan_fix(root_cause_analysis: RootCauseAnalysis) -> FixPlan:
+    result, _metadata = plan_fix_with_metadata(root_cause_analysis)
+    return result
+
+
+def plan_fix_with_metadata(root_cause_analysis: RootCauseAnalysis) -> tuple[FixPlan, dict[str, str | None]]:
     try:
-        return plan_fix_with_llm(root_cause_analysis)
-    except (LLMError, ValidationError):
-        return plan_fix_rule(root_cause_analysis)
+        return plan_fix_with_llm(root_cause_analysis), {
+            "execution_mode": "llm",
+            "fallback_reason": None,
+        }
+    except (LLMError, ValidationError) as exc:
+        return plan_fix_rule(root_cause_analysis), {
+            "execution_mode": "rule_fallback",
+            "fallback_reason": str(exc),
+        }
 
 
 def plan_fix_with_llm(

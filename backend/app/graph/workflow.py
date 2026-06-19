@@ -4,12 +4,12 @@ from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 
-from app.agents.fix_planner import plan_fix
+from app.agents.fix_planner import plan_fix_with_metadata
 from app.agents.knowledge_agent import retrieve_knowledge
 from app.agents.log_analyst import analyze_logs
 from app.agents.metric_analyst import analyze_metrics
-from app.agents.reviewer import review
-from app.agents.root_cause_agent import infer_root_cause
+from app.agents.reviewer import review_with_metadata
+from app.agents.root_cause_agent import infer_root_cause_with_metadata
 from app.eval.adapter import generate_eval_report, traced_node
 from app.graph.state import IncidentState
 from app.reports.markdown import render_markdown_report
@@ -43,22 +43,44 @@ def knowledge_node(state: IncidentState) -> dict:
     }
 
 
+def _with_agent_execution_metadata(
+    state: IncidentState,
+    agent_name: str,
+    execution_metadata: dict[str, str | None],
+) -> dict:
+    metadata = dict(state.get("metadata", {}))
+    agent_execution = dict(metadata.get("agent_execution", {}))
+    agent_execution[agent_name] = execution_metadata
+    metadata["agent_execution"] = agent_execution
+    return metadata
+
+
 def root_cause_node(state: IncidentState) -> dict:
+    result, execution_metadata = infer_root_cause_with_metadata(
+        state["log_analysis"],
+        state["metric_analysis"],
+        state["knowledge_results"],
+    )
     return {
-        "root_cause_analysis": infer_root_cause(
-            state["log_analysis"],
-            state["metric_analysis"],
-            state["knowledge_results"],
-        )
+        "root_cause_analysis": result,
+        "metadata": _with_agent_execution_metadata(state, "root_cause_agent", execution_metadata),
     }
 
 
 def fix_plan_node(state: IncidentState) -> dict:
-    return {"fix_plan": plan_fix(state["root_cause_analysis"])}
+    result, execution_metadata = plan_fix_with_metadata(state["root_cause_analysis"])
+    return {
+        "fix_plan": result,
+        "metadata": _with_agent_execution_metadata(state, "fix_planner", execution_metadata),
+    }
 
 
 def review_node(state: IncidentState) -> dict:
-    return {"review_result": review(state["root_cause_analysis"], state["fix_plan"])}
+    result, execution_metadata = review_with_metadata(state["root_cause_analysis"], state["fix_plan"])
+    return {
+        "review_result": result,
+        "metadata": _with_agent_execution_metadata(state, "reviewer", execution_metadata),
+    }
 
 
 def final_report_node(state: IncidentState) -> dict:
@@ -157,4 +179,5 @@ def run_incident_workflow(request: IncidentRequest) -> IncidentRunResult:
         markdown_report=state["markdown_report"],
         eval_report=state["eval_report"],
         trace_events=state["trace_events"],
+        metadata=state.get("metadata", {}),
     )
