@@ -58,7 +58,44 @@ class KnowledgeResults(BaseModel):
     related_runbooks: list[RetrievedCase] = Field(default_factory=list)
     known_failure_modes: list[str] = Field(default_factory=list)
     source_references: list[str] = Field(default_factory=list)
+    retrieval_mode: Literal["chroma_vector", "keyword_fallback"] = "keyword_fallback"
+    retrieval_error: str | None = None
     retrieval_confidence: float = 0.0
+
+
+class PrometheusFinding(BaseModel):
+    metric_name: str
+    query: str
+    value: float | int | None = None
+    baseline: float | int | None = None
+    severity: Literal["low", "medium", "high"] = "low"
+    summary: str
+
+
+class LogSearchHit(BaseModel):
+    timestamp: str | None = None
+    source: Literal["elasticsearch", "loki"] = "loki"
+    level: Literal["INFO", "WARN", "ERROR", "CRITICAL", "UNKNOWN"] = "UNKNOWN"
+    message: str
+    matched_terms: list[str] = Field(default_factory=list)
+
+
+class DeploymentEvent(BaseModel):
+    service_name: str
+    version: str
+    commit_sha: str
+    author: str
+    deployed_at: str
+    environment: str = "production"
+    summary: str
+    risk_flags: list[str] = Field(default_factory=list)
+
+
+class ExternalToolContext(BaseModel):
+    prometheus_findings: list[PrometheusFinding] = Field(default_factory=list)
+    log_search_hits: list[LogSearchHit] = Field(default_factory=list)
+    deployment_events: list[DeploymentEvent] = Field(default_factory=list)
+    tool_errors: list[str] = Field(default_factory=list)
 
 
 class RootCauseHypothesis(BaseModel):
@@ -153,6 +190,7 @@ class IncidentRunResult(BaseModel):
     markdown_report: str
     eval_report: EvalReport
     trace_events: list[TraceEvent]
+    tool_context: ExternalToolContext | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

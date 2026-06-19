@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.schemas.incident import (
     EvalReport,
+    ExternalToolContext,
     HumanApprovalResult,
     IncidentReport,
     IncidentRunResult,
@@ -176,6 +177,10 @@ class IncidentStore:
             ).fetchall()
         if row is None:
             return None
+        metadata = json.loads(row[6] or "{}")
+        tool_context = None
+        if isinstance(metadata.get("tool_context"), dict):
+            tool_context = ExternalToolContext.model_validate(metadata["tool_context"])
         return IncidentRunResult(
             incident_id=row[0],
             trace_id=row[1],
@@ -183,7 +188,8 @@ class IncidentStore:
             report=IncidentReport.model_validate(json.loads(row[3])),
             eval_report=EvalReport.model_validate(json.loads(row[4])),
             markdown_report=row[5],
-            metadata=json.loads(row[6] or "{}"),
+            tool_context=tool_context,
+            metadata=metadata,
             trace_events=[TraceEvent.model_validate(json.loads(item[0])) for item in trace_rows],
         )
 

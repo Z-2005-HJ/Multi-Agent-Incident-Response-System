@@ -26,6 +26,7 @@ def state_snapshot(state: IncidentState) -> dict[str, Any]:
         "status",
         "log_analysis",
         "metric_analysis",
+        "tool_context",
         "knowledge_results",
         "root_cause_analysis",
         "fix_plan",
@@ -75,6 +76,7 @@ def traced_node(
                 llm_error_type=agent_info.get("llm_error_type"),
                 prompt_version=agent_info.get("prompt_version"),
                 privacy_mode=agent_info.get("privacy_mode"),
+                tool_calls=metadata.get("tool_calls", []) if agent_name == "tool_adapter" else [],
             )
             output["trace_events"] = existing_events + [start, end]
             return output
@@ -135,6 +137,16 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
         agent_scores["knowledge_agent"]["top_source_score"] = (
             max((item.score for item in [*knowledge.retrieved_cases, *knowledge.related_runbooks]), default=0.0)
         )
+        agent_scores["knowledge_agent"]["retrieval_mode"] = knowledge.retrieval_mode
+        if knowledge.retrieval_error:
+            agent_scores["knowledge_agent"]["retrieval_error"] = knowledge.retrieval_error
+
+    tool_context = state.get("tool_context")
+    if tool_context:
+        agent_scores.setdefault("tool_adapter", {})["prometheus_findings"] = len(tool_context.prometheus_findings)
+        agent_scores["tool_adapter"]["log_search_hits"] = len(tool_context.log_search_hits)
+        agent_scores["tool_adapter"]["deployment_events"] = len(tool_context.deployment_events)
+        agent_scores["tool_adapter"]["tool_errors"] = tool_context.tool_errors
 
     root = state.get("root_cause_analysis")
     if root:
@@ -150,6 +162,8 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
     recommendations: list[str] = []
     if knowledge and not knowledge.source_references:
         recommendations.append("Add more incident cases or runbooks to improve retrieval quality.")
+    if knowledge and knowledge.retrieval_mode == "keyword_fallback":
+        recommendations.append("Chroma vector search fell back to keyword retrieval; check local vector store availability.")
     if root and root.missing_information:
         recommendations.extend(root.missing_information)
 

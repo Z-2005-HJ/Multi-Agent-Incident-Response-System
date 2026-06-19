@@ -2,10 +2,12 @@
 .venv/
 .env
 backend/.env
+.test-data/
 __pycache__/
 .pytest_cache/
 *.pyc
 backend/server.log
 backend/data/incidents.db
+backend/data/chroma/
 frontend/node_modules/
 frontend/dist/

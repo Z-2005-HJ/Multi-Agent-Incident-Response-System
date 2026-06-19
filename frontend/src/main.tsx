@@ -7,10 +7,13 @@ import {
   Clock3,
   Database,
   FileText,
+  Gauge,
+  GitBranch,
   Lock,
   Play,
   RefreshCw,
   Route,
+  Search,
   ShieldCheck,
   Terminal,
   XCircle,
@@ -18,7 +21,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-type TabKey = "report" | "trace" | "eval" | "llm";
+type TabKey = "report" | "tools" | "trace" | "eval" | "llm";
 
 type RootCause = {
   cause: string;
@@ -76,8 +79,37 @@ type IncidentResult = {
     recommendations: string[];
   };
   trace_events: TraceEvent[];
+  tool_context?: {
+    prometheus_findings: Array<{
+      metric_name: string;
+      query: string;
+      value?: number | null;
+      baseline?: number | null;
+      severity: string;
+      summary: string;
+    }>;
+    log_search_hits: Array<{
+      timestamp?: string | null;
+      source: string;
+      level: string;
+      message: string;
+      matched_terms: string[];
+    }>;
+    deployment_events: Array<{
+      service_name: string;
+      version: string;
+      commit_sha: string;
+      author: string;
+      deployed_at: string;
+      environment: string;
+      summary: string;
+      risk_flags: string[];
+    }>;
+    tool_errors: string[];
+  } | null;
   metadata: {
     agent_execution?: Record<string, { execution_mode?: string; fallback_reason?: string | null }>;
+    external_tools?: Record<string, unknown>;
   };
 };
 
@@ -272,6 +304,7 @@ function App() {
           <SummaryBand result={result} nodeEnds={nodeEnds} />
           <nav className="tabs">
             <TabButton active={activeTab === "report"} onClick={() => setActiveTab("report")} icon={<FileText size={16} />} label="Report" />
+            <TabButton active={activeTab === "tools"} onClick={() => setActiveTab("tools")} icon={<Gauge size={16} />} label="Tools" />
             <TabButton active={activeTab === "trace"} onClick={() => setActiveTab("trace")} icon={<Route size={16} />} label="Trace" />
             <TabButton active={activeTab === "eval"} onClick={() => setActiveTab("eval")} icon={<Activity size={16} />} label="Eval" />
             <TabButton active={activeTab === "llm"} onClick={() => setActiveTab("llm")} icon={<Zap size={16} />} label="LLM" />
@@ -287,6 +320,7 @@ function App() {
                 onApproval={submitApproval}
               />
             ) : null}
+            {result && activeTab === "tools" ? <ToolsView result={result} /> : null}
             {result && activeTab === "trace" ? <TraceView events={nodeEnds} /> : null}
             {result && activeTab === "eval" ? <EvalView result={result} /> : null}
             {activeTab === "llm" ? <LLMView result={result} status={llmStatus} /> : null}
@@ -304,7 +338,7 @@ function SummaryBand({ result, nodeEnds }: { result: IncidentResult | null; node
       <MetricTile icon={<ShieldCheck size={18} />} label="Severity" value={result?.report.severity ?? "-"} tone="red" />
       <MetricTile icon={<AlertTriangle size={18} />} label="Approval" value={result?.report.human_approval_required ? "required" : "clear"} tone="amber" />
       <MetricTile icon={<Clock3 size={18} />} label="Duration" value={`${duration} ms`} tone="blue" />
-      <MetricTile icon={<CheckCircle2 size={18} />} label="Nodes" value={`${nodeEnds.length}/9`} tone="green" />
+      <MetricTile icon={<CheckCircle2 size={18} />} label="Nodes" value={`${nodeEnds.length}/10`} tone="green" />
     </section>
   );
 }
@@ -467,13 +501,64 @@ function EvalView({ result }: { result: IncidentResult }) {
               <span>{String(score.execution_mode ?? "system")}</span>
               <span>{String(score.llm_latency_ms ?? score.duration_ms ?? 0)} ms</span>
               <span>{String(score.total_tokens ?? "-")} tok</span>
-              <span>{score.schema_valid === false ? "invalid" : "valid"}</span>
+              <span>{String(score.retrieval_mode ?? (score.schema_valid === false ? "invalid" : "valid"))}</span>
             </div>
           ))}
         </div>
       </section>
       <ListBlock title="Risks" items={result.eval_report.risks} />
       <ListBlock title="Recommendations" items={result.eval_report.recommendations} />
+    </div>
+  );
+}
+
+function ToolsView({ result }: { result: IncidentResult }) {
+  const tools = result.tool_context;
+  return (
+    <div className="tools-layout">
+      <section className="section-block wide">
+        <h3>Prometheus</h3>
+        <div className="tool-list">
+          {(tools?.prometheus_findings.length ? tools.prometheus_findings : []).map((item) => (
+            <article className="tool-item" key={item.metric_name}>
+              <div className="tool-head">
+                <strong><Gauge size={15} /> {item.metric_name}</strong>
+                <StatusPill label={item.severity} tone={item.severity === "high" ? "warn" : "muted"} />
+              </div>
+              <p>{item.summary}</p>
+              <code>{item.query}</code>
+            </article>
+          ))}
+          {!tools?.prometheus_findings.length ? <span className="history-empty">No Prometheus findings</span> : null}
+        </div>
+      </section>
+      <section className="section-block">
+        <h3>Log Search</h3>
+        <div className="tool-list">
+          {(tools?.log_search_hits.length ? tools.log_search_hits : []).map((item) => (
+            <article className="tool-item compact" key={`${item.timestamp}-${item.message}`}>
+              <strong><Search size={15} /> {item.level}</strong>
+              <p>{item.message}</p>
+              <span>{item.source} · {item.matched_terms.join(", ") || "no matched term"}</span>
+            </article>
+          ))}
+          {!tools?.log_search_hits.length ? <span className="history-empty">No log search hits</span> : null}
+        </div>
+      </section>
+      <section className="section-block">
+        <h3>Deployments</h3>
+        <div className="tool-list">
+          {(tools?.deployment_events.length ? tools.deployment_events : []).map((item) => (
+            <article className="tool-item compact" key={item.commit_sha}>
+              <strong><GitBranch size={15} /> {item.version}</strong>
+              <p>{item.summary}</p>
+              <span>{item.deployed_at} · {item.risk_flags.join(", ") || "no risk flag"}</span>
+            </article>
+          ))}
+          {!tools?.deployment_events.length ? <span className="history-empty">No deployment events</span> : null}
+        </div>
+      </section>
+      {tools?.tool_errors.length ? <ListBlock title="Tool Errors" items={tools.tool_errors} /> : null}
     </div>
   );
 }

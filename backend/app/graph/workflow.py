@@ -15,6 +15,7 @@ from app.eval.adapter import generate_eval_report, traced_node
 from app.graph.state import IncidentState
 from app.reports.markdown import render_markdown_report
 from app.schemas.incident import IncidentReport, IncidentRequest, IncidentRunResult
+from app.tools.external_tools import collect_external_tool_context
 
 
 def ingest_node(state: IncidentState) -> dict:
@@ -32,6 +33,37 @@ def log_node(state: IncidentState) -> dict:
 
 def metric_node(state: IncidentState) -> dict:
     return {"metric_analysis": analyze_metrics(state["request"])}
+
+
+def external_tools_node(state: IncidentState) -> dict:
+    tool_context = collect_external_tool_context(state["request"])
+    tool_calls = [
+        {
+            "name": "prometheus_mock",
+            "status": "ok",
+            "result_count": len(tool_context.prometheus_findings),
+        },
+        {
+            "name": "log_search_mock",
+            "status": "ok",
+            "result_count": len(tool_context.log_search_hits),
+        },
+        {
+            "name": "deployment_history_mock",
+            "status": "ok",
+            "result_count": len(tool_context.deployment_events),
+        },
+    ]
+    metadata = dict(state.get("metadata", {}))
+    metadata["external_tools"] = {
+        "prometheus_findings": len(tool_context.prometheus_findings),
+        "log_search_hits": len(tool_context.log_search_hits),
+        "deployment_events": len(tool_context.deployment_events),
+        "tool_errors": tool_context.tool_errors,
+    }
+    metadata["tool_context"] = tool_context.model_dump(mode="json")
+    metadata["tool_calls"] = [*metadata.get("tool_calls", []), *tool_calls]
+    return {"tool_context": tool_context, "metadata": metadata}
 
 
 def knowledge_node(state: IncidentState) -> dict:
@@ -61,6 +93,7 @@ def root_cause_node(state: IncidentState) -> dict:
         state["log_analysis"],
         state["metric_analysis"],
         state["knowledge_results"],
+        state.get("tool_context"),
     )
     return {
         "root_cause_analysis": result,
@@ -89,6 +122,7 @@ def final_report_node(state: IncidentState) -> dict:
     log_analysis = state["log_analysis"]
     metric_analysis = state["metric_analysis"]
     knowledge_results = state["knowledge_results"]
+    tool_context = state.get("tool_context")
     root_cause_analysis = state["root_cause_analysis"]
     fix_plan = state["fix_plan"]
     review_result = state["review_result"]
@@ -104,6 +138,10 @@ def final_report_node(state: IncidentState) -> dict:
         f"{item.metric_name}: {item.before} -> {item.after}"
         for item in metric_analysis.metric_anomalies
     )
+    if tool_context:
+        signals.extend(item.summary for item in tool_context.prometheus_findings)
+        signals.extend(f"log_search:{item.level} {item.message}" for item in tool_context.log_search_hits[:4])
+        signals.extend(f"deployment:{item.version} {', '.join(item.risk_flags)}" for item in tool_context.deployment_events)
     summary = (
         f"{request.service_name} incident analysis found "
         f"{len(root_cause_analysis.root_cause_hypotheses)} root cause hypothesis."
@@ -121,7 +159,12 @@ def final_report_node(state: IncidentState) -> dict:
         verification_steps=fix_plan.verification_steps,
         confidence=root_cause_analysis.confidence,
         review_notes=review_result.review_notes,
-        sources=knowledge_results.source_references,
+        sources=[
+            *knowledge_results.source_references,
+            *(["prometheus_mock"] if tool_context and tool_context.prometheus_findings else []),
+            *(["log_search_mock"] if tool_context and tool_context.log_search_hits else []),
+            *(["deployment_history_mock"] if tool_context and tool_context.deployment_events else []),
+        ],
         human_approval_required=fix_plan.requires_human_approval,
     )
     markdown = render_markdown_report(report)
@@ -141,6 +184,7 @@ def build_workflow():
     graph.add_node("ingest_incident", traced_node("ingest_incident", "ingest", ingest_node))
     graph.add_node("log_analysis", traced_node("log_analysis", "log_analyst", log_node))
     graph.add_node("metric_analysis", traced_node("metric_analysis", "metric_analyst", metric_node))
+    graph.add_node("external_tools", traced_node("external_tools", "tool_adapter", external_tools_node))
     graph.add_node("knowledge_retrieval", traced_node("knowledge_retrieval", "knowledge_agent", knowledge_node))
     graph.add_node("root_cause_analysis", traced_node("root_cause_analysis", "root_cause_agent", root_cause_node))
     graph.add_node("fix_planning", traced_node("fix_planning", "fix_planner", fix_plan_node))
@@ -151,7 +195,8 @@ def build_workflow():
     graph.add_edge(START, "ingest_incident")
     graph.add_edge("ingest_incident", "log_analysis")
     graph.add_edge("log_analysis", "metric_analysis")
-    graph.add_edge("metric_analysis", "knowledge_retrieval")
+    graph.add_edge("metric_analysis", "external_tools")
+    graph.add_edge("external_tools", "knowledge_retrieval")
     graph.add_edge("knowledge_retrieval", "root_cause_analysis")
     graph.add_edge("root_cause_analysis", "fix_planning")
     graph.add_edge("fix_planning", "review")
@@ -180,5 +225,6 @@ def run_incident_workflow(request: IncidentRequest) -> IncidentRunResult:
         markdown_report=state["markdown_report"],
         eval_report=state["eval_report"],
         trace_events=state["trace_events"],
+        tool_context=state.get("tool_context"),
         metadata=state.get("metadata", {}),
     )

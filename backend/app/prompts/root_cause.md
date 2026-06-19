@@ -16,4 +16,5 @@ The JSON object must match this shape:
 }
 Use only the provided evidence. Do not invent production actions or facts.
 If privacy_mode is strict, do not ask for raw logs or knowledge-base content.
-
+Treat external_tool_context as runtime evidence from Prometheus, log search, and deployment history.
+Prefer hypotheses that connect log patterns, metric changes, retrieved knowledge, and tool findings.

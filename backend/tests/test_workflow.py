@@ -49,6 +49,7 @@ def test_trace_contains_all_core_nodes() -> None:
         "ingest_incident",
         "log_analysis",
         "metric_analysis",
+        "external_tools",
         "knowledge_retrieval",
         "root_cause_analysis",
         "fix_planning",
@@ -56,6 +57,27 @@ def test_trace_contains_all_core_nodes() -> None:
         "final_report",
         "eval_report",
     }.issubset(node_names)
+
+
+def test_workflow_includes_external_tool_context() -> None:
+    result = run_incident_workflow(sample_request())
+
+    assert result.tool_context is not None
+    assert result.tool_context.prometheus_findings
+    assert result.tool_context.log_search_hits
+    assert result.tool_context.deployment_events
+    assert "prometheus_mock" in result.report.sources
+    assert result.eval_report.agent_scores["tool_adapter"]["prometheus_findings"] >= 1
+
+
+def test_knowledge_agent_reports_retrieval_mode() -> None:
+    result = run_incident_workflow(sample_request())
+
+    assert result.eval_report.agent_scores["knowledge_agent"]["retrieval_mode"] in {
+        "chroma_vector",
+        "keyword_fallback",
+    }
+    assert result.metadata["external_tools"]["log_search_hits"] >= 1
 
 
 def test_llm_execution_metadata_is_reported() -> None:

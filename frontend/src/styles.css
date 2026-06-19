@@ -263,7 +263,8 @@ textarea:focus {
 }
 
 .report-grid,
-.eval-layout {
+.eval-layout,
+.tools-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -306,6 +307,55 @@ li {
   display: grid;
   gap: 10px;
   margin-top: 10px;
+}
+
+.tool-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tool-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.tool-item.compact {
+  gap: 6px;
+}
+
+.tool-head,
+.tool-item strong {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tool-item strong {
+  justify-content: flex-start;
+}
+
+.tool-item p {
+  margin: 0;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tool-item span,
+.tool-item code {
+  color: #667085;
+  font-size: 12px;
+}
+
+.tool-item code {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .cause-item {
@@ -544,7 +594,8 @@ li {
 
   .summary-grid,
   .report-grid,
-  .eval-layout {
+  .eval-layout,
+  .tools-layout {
     grid-template-columns: 1fr;
   }
 

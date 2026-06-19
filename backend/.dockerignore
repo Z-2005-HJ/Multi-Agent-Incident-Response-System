@@ -4,4 +4,4 @@ __pycache__/
 *.pyc
 *.log
 data/incidents.db
-
+data/chroma/

@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 
 from app.schemas.incident import (
     EvalReport,
+    ExternalToolContext,
     FixPlan,
     IncidentReport,
     IncidentRequest,
@@ -22,6 +23,7 @@ class IncidentState(TypedDict, total=False):
     request: IncidentRequest
     log_analysis: LogAnalysis
     metric_analysis: MetricAnalysis
+    tool_context: ExternalToolContext
     knowledge_results: KnowledgeResults
     root_cause_analysis: RootCauseAnalysis
     fix_plan: FixPlan

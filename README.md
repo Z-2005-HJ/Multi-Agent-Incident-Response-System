@@ -1,5 +1,24 @@
 # Multi-Agent Incident Response System
 
+## Current Implementation Status
+
+当前版本已经完成第一版可运行 MVP，并继续补充了以下能力：
+
+- Multi-Agent workflow：基于 FastAPI + LangGraph，包含 Log Analyst、Metric Analyst、Knowledge Agent、Root Cause Agent、Fix Planner、Reviewer、Eval Adapter。
+- LLM 接入：支持 OpenAI-compatible API，可接正规厂商模型，也可接 API 中转站；严格隐私模式下默认不向外部 LLM 发送原始日志和完整知识库内容。
+- 真实向量 RAG：已选择 Chroma，使用本地持久化向量库 `backend/data/chroma/`，并配套 deterministic local embedding；Chroma 不可用时自动回退关键词检索。
+- 外部工具接入 mock：已实现 Prometheus 指标查询 mock、Loki/Elasticsearch 风格日志搜索 mock、Git 部署历史 mock；Slack / 飞书通知 mock 暂不实现。
+- 可观测性：trace events、agent execution metadata、LLM token/latency/fallback 信息、RAG retrieval mode、tool result counts 都会进入 eval report。
+- Human-in-the-loop：高风险修复计划支持人工 approve/reject API 和前端操作。
+- 前端控制台：React + Vite + TypeScript，支持 incident 输入、报告、工具结果、trace、eval、LLM 状态、历史记录、人工审批。
+- 本地持久化：SQLite 保存运行历史和 trace，Chroma 保存本地知识库索引；这些生成数据不会提交到 Git。
+
+暂缓内容：
+
+- Slack / 飞书通知 mock 暂不做。
+- 认证和权限暂不做。
+- 云部署、CI/CD、GitHub Actions 暂不做。
+
 多 Agent 智能故障排查系统。
 
 这是一个面向真实工程场景的多 agent 项目。它模拟企业线上服务发生故障后的排查流程：系统读取告警、日志、指标和历史故障知识库，组织多个专业 agent 协作分析，最终生成结构化 Incident Report，帮助工程师快速定位问题、评估风险并制定修复方案。
@@ -727,23 +746,24 @@ reviewer 质量检查
 
 ### 8.4 RAG / Knowledge
 
-第一版：
+当前版本：
 
 ```text
 本地 JSON / Markdown
-关键词检索
+Chroma 向量检索
+本地 deterministic embedding
+关键词检索 fallback
 ```
 
-增强版：
+后续增强：
 
 ```text
-Chroma 或 FAISS
 OpenAI embeddings 或 sentence-transformers
 Hybrid search
 Rerank
 ```
 
-第一版先不要过早引入重型 RAG 工具，优先保证业务流程完整。
+当前版本已经接入 Chroma，优先保证本地可运行、可测试、可持久化，后续可以替换为更强的 embedding 或 hybrid search。
 
 ### 8.5 数据存储
 
@@ -909,7 +929,8 @@ LangGraph 工作流
 6 个 agent 节点
 本地 sample logs / metrics
 本地 JSON knowledge base
-关键词检索版 Knowledge Agent
+Chroma 向量检索版 Knowledge Agent
+Prometheus / 日志搜索 / Git 部署历史 mock tools
 Pydantic 结构化输出
 Eval Adapter trace 采集
 结构化 Incident Report
@@ -922,7 +943,7 @@ pytest 测试
 ```text
 真实 Prometheus 接入
 真实 Elasticsearch 接入
-复杂向量数据库
+Slack / 飞书通知
 用户登录权限
 生产级部署
 复杂前端大屏
@@ -941,12 +962,11 @@ pytest 测试
 
 ```text
 React Web UI
-Chroma / FAISS 向量检索
 真实 OpenAI 模型调用
 LangGraph checkpoint
 human-in-the-loop interrupt
 LLM-as-judge 评估
-Prometheus sample API
+真实 Prometheus / Elasticsearch / Loki API
 trace 可视化页面
 incident replay
 ```
@@ -1144,7 +1164,8 @@ LangGraph 工作流
 6 个 agent 节点
 本地 sample logs / metrics
 本地 JSON / Markdown knowledge base
-关键词检索版 Knowledge Agent
+Chroma 向量检索版 Knowledge Agent
+Prometheus / 日志搜索 / Git 部署历史 mock tools
 Pydantic 结构化输出
 Eval Adapter trace 采集
 结构化 Incident Report
