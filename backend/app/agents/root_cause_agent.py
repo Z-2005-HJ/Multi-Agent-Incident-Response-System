@@ -46,22 +46,22 @@ def _root_cause_payload(
                 "retrieval_mode": knowledge_results.retrieval_mode,
                 "retrieval_confidence": knowledge_results.retrieval_confidence,
             },
-            "external_tool_context": _strict_tool_context(tool_context),
+            "manual_evidence_context": _strict_manual_evidence_context(tool_context),
         }
     return {
         "privacy_mode": settings.privacy_mode,
         "log_analysis": log_analysis.model_dump(mode="json"),
         "metric_analysis": metric_analysis.model_dump(mode="json"),
         "knowledge_results": knowledge_results.model_dump(mode="json"),
-        "external_tool_context": tool_context.model_dump(mode="json") if tool_context else {},
+        "manual_evidence_context": tool_context.model_dump(mode="json") if tool_context else {},
     }
 
 
-def _strict_tool_context(tool_context: ExternalToolContext | None) -> dict[str, Any]:
+def _strict_manual_evidence_context(tool_context: ExternalToolContext | None) -> dict[str, Any]:
     if tool_context is None:
         return {}
     return {
-        "prometheus_findings": [
+        "metric_findings": [
             {
                 "metric_name": item.metric_name,
                 "value": item.value,
@@ -69,9 +69,9 @@ def _strict_tool_context(tool_context: ExternalToolContext | None) -> dict[str, 
                 "severity": item.severity,
                 "summary": item.summary,
             }
-            for item in tool_context.prometheus_findings
+            for item in tool_context.metric_findings
         ],
-        "log_search_hit_count": len(tool_context.log_search_hits),
+        "log_evidence_hit_count": len(tool_context.log_search_hits),
         "log_matched_terms": sorted({term for hit in tool_context.log_search_hits for term in hit.matched_terms}),
         "deployment_events": [
             {
@@ -161,7 +161,7 @@ def infer_root_cause_rule(
     )
     evidence.extend(f"knowledge:{source}" for source in knowledge_results.source_references[:3])
     if tool_context:
-        evidence.extend(item.summary for item in tool_context.prometheus_findings[:3])
+        evidence.extend(item.summary for item in tool_context.metric_findings[:3])
         evidence.extend(f"deployment:{item.version} flags={','.join(item.risk_flags)}" for item in tool_context.deployment_events[:2])
 
     hypotheses: list[RootCauseHypothesis] = []

@@ -93,6 +93,25 @@ h3 {
   cursor: wait;
 }
 
+.secondary-button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+  color: #344054;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
 .workspace {
   flex: 1;
   display: grid;
@@ -495,6 +514,30 @@ li {
   display: grid;
   gap: 10px;
   padding-top: 4px;
+}
+
+.feedback-panel {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.feedback-input {
+  min-height: 110px;
+}
+
+.feedback-result {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid #dce2e8;
+  border-radius: 6px;
+  background: #f9fafb;
+}
+
+.feedback-result span {
+  color: #667085;
+  font-size: 12px;
 }
 
 .history-list {

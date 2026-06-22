@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.graph.workflow import run_incident_workflow
+from app.agents.feedback_ingestion_agent import ingest_manual_feedback
 from app.llm.settings import get_llm_settings
 from app.schemas.incident import (
     HumanApprovalRequest,
@@ -10,10 +11,11 @@ from app.schemas.incident import (
     IncidentRequest,
     IncidentRunResult,
     IncidentRunSummary,
+    ManualFeedbackRequest,
+    StructuredFeedbackDocument,
     TraceEvent,
 )
 from app.storage.sqlite import IncidentStore
-from app.tools.settings import get_tool_settings
 
 
 router = APIRouter()
@@ -38,39 +40,16 @@ def llm_status() -> dict[str, object]:
     }
 
 
-@router.get("/tools/status")
-def tools_status() -> dict[str, object]:
-    settings = get_tool_settings()
-    return {
-        "mode": settings.mode,
-        "timeout_seconds": settings.timeout_seconds,
-        "prometheus": {
-            "configured": settings.prometheus_enabled,
-            "base_url_configured": bool(settings.prometheus_base_url),
-            "token_configured": bool(settings.prometheus_bearer_token),
-        },
-        "log_search": {
-            "provider": settings.log_search_provider,
-            "loki_configured": settings.loki_enabled,
-            "elasticsearch_configured": settings.elasticsearch_enabled,
-            "loki_base_url_configured": bool(settings.loki_base_url),
-            "elasticsearch_base_url_configured": bool(settings.elasticsearch_base_url),
-            "token_configured": bool(settings.loki_bearer_token or settings.elasticsearch_api_key),
-        },
-        "github": {
-            "configured": settings.github_enabled,
-            "repository": settings.github_repository,
-            "branch": settings.github_branch,
-            "token_configured": bool(settings.github_token),
-        },
-    }
-
-
 @router.post("/incidents/run", response_model=IncidentRunResult)
 def run_incident(request: IncidentRequest) -> IncidentRunResult:
     result = run_incident_workflow(request)
     store.save_run(result)
     return result
+
+
+@router.post("/feedback/ingest", response_model=StructuredFeedbackDocument)
+def ingest_feedback(request: ManualFeedbackRequest) -> StructuredFeedbackDocument:
+    return ingest_manual_feedback(request)
 
 
 @router.get("/incidents", response_model=list[IncidentRunSummary])

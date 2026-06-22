@@ -76,7 +76,7 @@ def traced_node(
                 llm_error_type=agent_info.get("llm_error_type"),
                 prompt_version=agent_info.get("prompt_version"),
                 privacy_mode=agent_info.get("privacy_mode"),
-                tool_calls=metadata.get("tool_calls", []) if agent_name == "tool_adapter" else [],
+                tool_calls=metadata.get("tool_calls", []) if agent_name == "evidence_adapter" else [],
             )
             output["trace_events"] = existing_events + [start, end]
             return output
@@ -143,11 +143,11 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
 
     tool_context = state.get("tool_context")
     if tool_context:
-        agent_scores.setdefault("tool_adapter", {})["prometheus_findings"] = len(tool_context.prometheus_findings)
-        agent_scores["tool_adapter"]["log_search_hits"] = len(tool_context.log_search_hits)
-        agent_scores["tool_adapter"]["deployment_events"] = len(tool_context.deployment_events)
-        agent_scores["tool_adapter"]["tool_sources"] = tool_context.tool_sources
-        agent_scores["tool_adapter"]["tool_errors"] = tool_context.tool_errors
+        agent_scores.setdefault("evidence_adapter", {})["metric_findings"] = len(tool_context.metric_findings)
+        agent_scores["evidence_adapter"]["log_evidence_hits"] = len(tool_context.log_search_hits)
+        agent_scores["evidence_adapter"]["deployment_clues"] = len(tool_context.deployment_events)
+        agent_scores["evidence_adapter"]["evidence_sources"] = tool_context.tool_sources
+        agent_scores["evidence_adapter"]["evidence_errors"] = tool_context.tool_errors
 
     root = state.get("root_cause_analysis")
     if root:

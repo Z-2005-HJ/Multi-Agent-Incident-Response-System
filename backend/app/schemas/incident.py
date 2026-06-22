@@ -63,7 +63,7 @@ class KnowledgeResults(BaseModel):
     retrieval_confidence: float = 0.0
 
 
-class PrometheusFinding(BaseModel):
+class MetricEvidence(BaseModel):
     metric_name: str
     query: str
     value: float | int | None = None
@@ -74,7 +74,7 @@ class PrometheusFinding(BaseModel):
 
 class LogSearchHit(BaseModel):
     timestamp: str | None = None
-    source: Literal["elasticsearch", "loki"] = "loki"
+    source: Literal["manual", "elasticsearch", "loki"] = "manual"
     level: Literal["INFO", "WARN", "ERROR", "CRITICAL", "UNKNOWN"] = "UNKNOWN"
     message: str
     matched_terms: list[str] = Field(default_factory=list)
@@ -92,7 +92,7 @@ class DeploymentEvent(BaseModel):
 
 
 class ExternalToolContext(BaseModel):
-    prometheus_findings: list[PrometheusFinding] = Field(default_factory=list)
+    metric_findings: list[MetricEvidence] = Field(default_factory=list)
     log_search_hits: list[LogSearchHit] = Field(default_factory=list)
     deployment_events: list[DeploymentEvent] = Field(default_factory=list)
     tool_sources: dict[str, str] = Field(default_factory=dict)
@@ -217,3 +217,37 @@ class HumanApprovalResult(BaseModel):
     approved_by: str
     note: str
     updated_at: str
+
+
+class ManualFeedbackRequest(BaseModel):
+    raw_content: str
+    source_name: str = "manual_upload"
+    feedback_type: Literal[
+        "error_log",
+        "metric_snapshot",
+        "incident_report",
+        "runbook",
+        "deployment_note",
+        "unknown",
+    ] | None = None
+    title: str | None = None
+    note: str = ""
+
+
+class StructuredFeedbackDocument(BaseModel):
+    feedback_id: str
+    feedback_type: Literal[
+        "error_log",
+        "metric_snapshot",
+        "incident_report",
+        "runbook",
+        "deployment_note",
+        "unknown",
+    ]
+    title: str
+    summary: str
+    key_signals: list[str] = Field(default_factory=list)
+    suspected_components: list[str] = Field(default_factory=list)
+    sanitized_content: str
+    doc_path: str
+    knowledge_source_id: str

@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-type TabKey = "report" | "tools" | "trace" | "eval" | "llm";
+type TabKey = "report" | "evidence" | "trace" | "eval" | "llm";
 
 type RootCause = {
   cause: string;
@@ -80,7 +80,7 @@ type IncidentResult = {
   };
   trace_events: TraceEvent[];
   tool_context?: {
-    prometheus_findings: Array<{
+    metric_findings: Array<{
       metric_name: string;
       query: string;
       value?: number | null;
@@ -110,7 +110,7 @@ type IncidentResult = {
   } | null;
   metadata: {
     agent_execution?: Record<string, { execution_mode?: string; fallback_reason?: string | null }>;
-    external_tools?: Record<string, unknown>;
+    manual_evidence?: Record<string, unknown>;
   };
 };
 
@@ -132,6 +132,16 @@ type IncidentSummary = {
   human_approval_required: boolean;
   approval_status: string;
   created_at?: string | null;
+};
+
+type FeedbackResult = {
+  feedback_id: string;
+  feedback_type: string;
+  title: string;
+  summary: string;
+  key_signals: string[];
+  doc_path: string;
+  knowledge_source_id: string;
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -169,7 +179,10 @@ function App() {
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
   const [history, setHistory] = useState<IncidentSummary[]>([]);
   const [approvalNote, setApprovalNote] = useState("");
+  const [feedbackContent, setFeedbackContent] = useState("");
+  const [feedbackResult, setFeedbackResult] = useState<FeedbackResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isSavingFeedback, setIsSavingFeedback] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const nodeEnds = useMemo(
@@ -248,6 +261,36 @@ function App() {
     setApprovalNote("");
   }
 
+  async function ingestFeedback() {
+    if (!feedbackContent.trim()) {
+      setError("Manual feedback is empty");
+      return;
+    }
+    setIsSavingFeedback(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/feedback/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source_name: "frontend-manual-feedback",
+          raw_content: feedbackContent,
+          note: `Related service: ${serviceName}`,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`HTTP ${response.status}: ${body.slice(0, 240)}`);
+      }
+      setFeedbackResult((await response.json()) as FeedbackResult);
+      setFeedbackContent("");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Unable to save feedback");
+    } finally {
+      setIsSavingFeedback(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -297,6 +340,28 @@ function App() {
             <span>Metrics JSON</span>
             <textarea value={metricsJson} onChange={(event) => setMetricsJson(event.target.value)} />
           </label>
+          <section className="feedback-panel">
+            <div className="panel-heading">
+              <FileText size={18} />
+              <h2>Manual Feedback</h2>
+            </div>
+            <textarea
+              className="feedback-input"
+              value={feedbackContent}
+              onChange={(event) => setFeedbackContent(event.target.value)}
+              placeholder="Paste sanitized system feedback, error output, or investigation notes"
+            />
+            <button className="secondary-button" onClick={ingestFeedback} disabled={isSavingFeedback} type="button">
+              {isSavingFeedback ? <RefreshCw className="spin" size={16} /> : <FileText size={16} />}
+              <span>{isSavingFeedback ? "Saving" : "Save Feedback"}</span>
+            </button>
+            {feedbackResult ? (
+              <div className="feedback-result">
+                <strong>{feedbackResult.feedback_type}</strong>
+                <span>{feedbackResult.knowledge_source_id}</span>
+              </div>
+            ) : null}
+          </section>
           {error ? <div className="error-strip">{error}</div> : null}
           <HistoryPanel items={history} selectedId={result?.incident_id} onSelect={loadIncident} />
         </form>
@@ -305,7 +370,7 @@ function App() {
           <SummaryBand result={result} nodeEnds={nodeEnds} />
           <nav className="tabs">
             <TabButton active={activeTab === "report"} onClick={() => setActiveTab("report")} icon={<FileText size={16} />} label="Report" />
-            <TabButton active={activeTab === "tools"} onClick={() => setActiveTab("tools")} icon={<Gauge size={16} />} label="Tools" />
+            <TabButton active={activeTab === "evidence"} onClick={() => setActiveTab("evidence")} icon={<Gauge size={16} />} label="Evidence" />
             <TabButton active={activeTab === "trace"} onClick={() => setActiveTab("trace")} icon={<Route size={16} />} label="Trace" />
             <TabButton active={activeTab === "eval"} onClick={() => setActiveTab("eval")} icon={<Activity size={16} />} label="Eval" />
             <TabButton active={activeTab === "llm"} onClick={() => setActiveTab("llm")} icon={<Zap size={16} />} label="LLM" />
@@ -321,7 +386,7 @@ function App() {
                 onApproval={submitApproval}
               />
             ) : null}
-            {result && activeTab === "tools" ? <ToolsView result={result} /> : null}
+            {result && activeTab === "evidence" ? <EvidenceView result={result} /> : null}
             {result && activeTab === "trace" ? <TraceView events={nodeEnds} /> : null}
             {result && activeTab === "eval" ? <EvalView result={result} /> : null}
             {activeTab === "llm" ? <LLMView result={result} status={llmStatus} /> : null}
@@ -513,15 +578,15 @@ function EvalView({ result }: { result: IncidentResult }) {
   );
 }
 
-function ToolsView({ result }: { result: IncidentResult }) {
+function EvidenceView({ result }: { result: IncidentResult }) {
   const tools = result.tool_context;
   return (
     <div className="tools-layout">
       <section className="section-block wide">
-        <h3>Prometheus</h3>
-        <ToolSource value={tools?.tool_sources.prometheus} />
+        <h3>Metric Evidence</h3>
+        <ToolSource value={tools?.tool_sources.metrics} />
         <div className="tool-list">
-          {(tools?.prometheus_findings.length ? tools.prometheus_findings : []).map((item) => (
+          {(tools?.metric_findings.length ? tools.metric_findings : []).map((item) => (
             <article className="tool-item" key={item.metric_name}>
               <div className="tool-head">
                 <strong><Gauge size={15} /> {item.metric_name}</strong>
@@ -531,12 +596,12 @@ function ToolsView({ result }: { result: IncidentResult }) {
               <code>{item.query}</code>
             </article>
           ))}
-          {!tools?.prometheus_findings.length ? <span className="history-empty">No Prometheus findings</span> : null}
+          {!tools?.metric_findings.length ? <span className="history-empty">No metric evidence</span> : null}
         </div>
       </section>
       <section className="section-block">
-        <h3>Log Search</h3>
-        <ToolSource value={tools?.tool_sources.log_search} />
+        <h3>Log Evidence</h3>
+        <ToolSource value={tools?.tool_sources.logs} />
         <div className="tool-list">
           {(tools?.log_search_hits.length ? tools.log_search_hits : []).map((item) => (
             <article className="tool-item compact" key={`${item.timestamp}-${item.message}`}>
@@ -549,8 +614,8 @@ function ToolsView({ result }: { result: IncidentResult }) {
         </div>
       </section>
       <section className="section-block">
-        <h3>Deployments</h3>
-        <ToolSource value={tools?.tool_sources.github} />
+        <h3>Deployment Clues</h3>
+        <ToolSource value={tools?.tool_sources.deployment} />
         <div className="tool-list">
           {(tools?.deployment_events.length ? tools.deployment_events : []).map((item) => (
             <article className="tool-item compact" key={item.commit_sha}>

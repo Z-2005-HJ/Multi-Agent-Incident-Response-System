@@ -49,7 +49,7 @@ def test_trace_contains_all_core_nodes() -> None:
         "ingest_incident",
         "log_analysis",
         "metric_analysis",
-        "external_tools",
+        "manual_evidence",
         "knowledge_retrieval",
         "root_cause_analysis",
         "fix_planning",
@@ -59,16 +59,16 @@ def test_trace_contains_all_core_nodes() -> None:
     }.issubset(node_names)
 
 
-def test_workflow_includes_external_tool_context() -> None:
+def test_workflow_includes_manual_evidence_context() -> None:
     result = run_incident_workflow(sample_request())
 
     assert result.tool_context is not None
-    assert result.tool_context.prometheus_findings
+    assert result.tool_context.metric_findings
     assert result.tool_context.log_search_hits
     assert result.tool_context.deployment_events
-    assert "prometheus_mock" in result.report.sources
-    assert result.tool_context.tool_sources["prometheus"] == "mock"
-    assert result.eval_report.agent_scores["tool_adapter"]["prometheus_findings"] >= 1
+    assert "manual_metrics_manual_input" in result.report.sources
+    assert result.tool_context.tool_sources["metrics"] == "manual_input"
+    assert result.eval_report.agent_scores["evidence_adapter"]["metric_findings"] >= 1
 
 
 def test_knowledge_agent_reports_retrieval_mode() -> None:
@@ -78,7 +78,7 @@ def test_knowledge_agent_reports_retrieval_mode() -> None:
         "chroma_vector",
         "keyword_fallback",
     }
-    assert result.metadata["external_tools"]["log_search_hits"] >= 1
+    assert result.metadata["manual_evidence"]["log_search_hits"] >= 1
 
 
 def test_llm_execution_metadata_is_reported() -> None:

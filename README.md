@@ -2,7 +2,9 @@
 
 一个面向 SRE / 后端 / 平台工程场景的多 Agent 故障响应系统。
 
-系统接收一次线上故障的告警、日志、指标和时间窗口，自动组织多个专业 Agent 完成日志分析、指标分析、历史知识检索、外部工具查询、根因推断、修复计划生成、风险审核和报告输出。项目重点不是做聊天机器人，而是展示一个可运行、可测试、可观测、可扩展的 AI Agent 工程系统。
+当前项目聚焦于**手动上传故障材料后的本地智能分析**：用户提供告警、日志、指标、系统反馈或排障记录，系统通过多 Agent workflow 完成证据提取、历史知识检索、根因推断、修复建议、风险审核和报告生成。
+
+项目不会主动连接或扫描真实生产系统，也不会自动进入 Prometheus、Loki、Elasticsearch、GitHub 等外部平台排查。所有分析输入都来自用户手动提供的材料。
 
 ## 功能概览
 
@@ -15,16 +17,18 @@
 - LLM mock / fallback，未配置模型时仍可完整运行
 - Chroma 向量 RAG，本地知识库持久化检索
 - deterministic local embedding，不依赖外部 embedding API
-- Prometheus / Loki / Elasticsearch / GitHub commit history 真实 HTTP client
-- 外部工具 mock fallback，未配置真实工具时自动使用 mock 数据
+- 手动日志、指标、告警内容的本地证据提取
+- Manual Feedback Ingestion Agent：识别手动上传的系统反馈类型，脱敏、结构化并写入文档
 - SQLite 运行历史、报告和 trace 持久化
-- Eval Adapter，记录 Agent 执行、工具调用、LLM token、latency、fallback 等信息
+- Eval Adapter，记录 Agent 执行、LLM token、latency、fallback 等信息
 - Human approval API，支持高风险修复计划 approve / reject
 - Dockerfile 和 docker-compose
 - 后端 pytest 测试与前端生产构建
 
 暂未实现：
 
+- 自动连接真实生产系统排查
+- Prometheus / Loki / Elasticsearch / GitHub 自动查询 client
 - 用户认证和权限系统
 - Slack / 飞书通知
 - 云部署和 GitHub Actions CI
@@ -37,12 +41,12 @@
 
 ```mermaid
 flowchart LR
-    A["Incident Input"] --> B["FastAPI API"]
+    A["Manual Incident Input"] --> B["FastAPI API"]
     B --> C["LangGraph Workflow"]
 
     C --> D["Log Analyst"]
     D --> E["Metric Analyst"]
-    E --> F["External Tool Adapter"]
+    E --> F["Manual Evidence Extractor"]
     F --> G["Knowledge Agent"]
     G --> H["Root Cause Agent"]
     H --> I["Fix Planner"]
@@ -50,31 +54,34 @@ flowchart LR
     J --> K["Report Generator"]
     K --> L["Eval Adapter"]
 
-    F --> F1["Prometheus"]
-    F --> F2["Loki / Elasticsearch"]
-    F --> F3["GitHub Commit History"]
-    G --> G1["Chroma Vector Store"]
-    H --> M["OpenAI-compatible LLM"]
-    I --> M
-    J --> M
+    P["Manual Feedback Upload"] --> Q["Feedback Ingestion Agent"]
+    Q --> R["docs/feedback"]
+    Q --> S["knowledge_base/manual_feedback.json"]
+    S --> G
 
-    L --> N["SQLite"]
-    K --> N
-    B --> O["React Console"]
+    G --> T["Chroma Vector Store"]
+    H --> U["OpenAI-compatible LLM"]
+    I --> U
+    J --> U
+
+    L --> V["SQLite"]
+    K --> V
+    B --> W["React Console"]
 ```
 
 ## Agent 设计
 
 | Agent | 作用 | 主要输出 |
 | --- | --- | --- |
-| Log Analyst | 从日志中提取错误模式、关键日志行、疑似组件和时间线 | `LogAnalysis` |
-| Metric Analyst | 分析错误率、延迟、连接池等指标异常 | `MetricAnalysis` |
-| External Tool Adapter | 查询真实或 mock 的 Prometheus、日志平台、GitHub 提交历史 | `ExternalToolContext` |
-| Knowledge Agent | 通过 Chroma RAG 检索历史 incident 和 runbook | `KnowledgeResults` |
-| Root Cause Agent | 综合日志、指标、工具、知识库证据推断根因 | `RootCauseAnalysis` |
+| Log Analyst | 从手动输入日志中提取错误模式、关键日志、疑似组件和时间线 | `LogAnalysis` |
+| Metric Analyst | 从手动输入指标中分析错误率、延迟、连接池等异常 | `MetricAnalysis` |
+| Manual Evidence Extractor | 从手动输入的 logs / metrics / alert 中提取本地证据 | `ExternalToolContext` |
+| Knowledge Agent | 通过 Chroma RAG 检索历史 incident、runbook、manual feedback | `KnowledgeResults` |
+| Root Cause Agent | 综合日志、指标、本地证据、知识库结果推断根因 | `RootCauseAnalysis` |
 | Fix Planner | 生成诊断步骤、修复建议、回滚计划、验证步骤 | `FixPlan` |
 | Reviewer | 审核证据链、风险和修复计划质量 | `ReviewResult` |
-| Eval Adapter | 采集 trace、latency、fallback、token、tool result 等可观测信息 | `EvalReport` |
+| Feedback Ingestion Agent | 对手动上传的系统反馈进行分类、脱敏、结构化和文档沉淀 | `StructuredFeedbackDocument` |
+| Eval Adapter | 采集 trace、latency、fallback、token、retrieval result 等可观测信息 | `EvalReport` |
 
 ## 技术栈
 
@@ -117,12 +124,14 @@ flowchart LR
 │   │   ├── reports/         # Markdown report renderer
 │   │   ├── schemas/         # Pydantic schemas
 │   │   ├── storage/         # SQLite persistence
-│   │   └── tools/           # Prometheus / Loki / Elasticsearch / GitHub clients
+│   │   └── tools/           # 本地证据提取工具
 │   ├── data/
-│   │   ├── knowledge_base/  # 本地 incident / runbook 知识库
+│   │   ├── knowledge_base/  # 本地 incident / runbook / manual feedback 知识库
 │   │   ├── sample_logs/     # 示例日志
 │   │   └── sample_metrics/  # 示例指标
 │   └── tests/
+├── docs/
+│   └── feedback/            # 手动反馈入库后生成的脱敏 Markdown
 ├── frontend/
 │   └── src/
 ├── docker-compose.yml
@@ -146,13 +155,12 @@ python -m venv .venv
 
 ### 2. 配置环境变量
 
-在 `backend/.env` 中配置。没有真实 LLM 或真实外部工具时也可以不配置，系统会自动使用 mock / fallback。
+在 `backend/.env` 中配置。没有真实 LLM 时也可以不配置，系统会使用 mock / fallback。
 
 最小配置：
 
 ```env
 LLM_MODE=mock
-TOOL_MODE=mock
 ```
 
 OpenAI-compatible LLM：
@@ -165,35 +173,10 @@ LLM_TIMEOUT_SECONDS=30
 LLM_PRIVACY_MODE=strict
 ```
 
-外部工具：
-
-```env
-TOOL_MODE=auto
-TOOL_TIMEOUT_SECONDS=8
-
-PROMETHEUS_BASE_URL=http://localhost:9090
-PROMETHEUS_BEARER_TOKEN=optional_token
-PROMETHEUS_QUERY_TEMPLATE={metric_name}{service="{service_name}"}
-
-LOG_SEARCH_PROVIDER=loki
-LOKI_BASE_URL=http://localhost:3100
-LOKI_BEARER_TOKEN=optional_token
-LOKI_QUERY_TEMPLATE={service="{service_name}"} |= "ERROR"
-
-ELASTICSEARCH_BASE_URL=http://localhost:9200
-ELASTICSEARCH_API_KEY=optional_api_key
-ELASTICSEARCH_INDEX=logs-*
-
-GITHUB_REPOSITORY=owner/repo
-GITHUB_TOKEN=optional_token
-GITHUB_BRANCH=main
-GITHUB_LOOKBACK_COMMITS=10
-```
-
 说明：
 
-- `TOOL_MODE=auto`：优先请求真实工具，失败时 fallback 到 mock
-- `TOOL_MODE=mock`：只使用 mock，适合本地 demo 和测试
+- `LLM_MODE=mock`：只使用规则和 mock，适合本地 demo
+- 配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 后，系统会优先调用真实 LLM
 - `LLM_PRIVACY_MODE=strict`：默认不向外部 LLM 发送 raw logs 和完整知识库正文
 
 ### 3. 启动后端
@@ -250,14 +233,6 @@ GET /llm/status
 
 返回是否配置 base URL、API key、模型名和隐私模式。不会返回 API key 明文。
 
-### 外部工具状态
-
-```http
-GET /tools/status
-```
-
-返回 Prometheus、Loki、Elasticsearch、GitHub 是否已配置。不会返回 token 明文。
-
 ### 运行 Incident 分析
 
 ```http
@@ -296,8 +271,34 @@ Content-Type: application/json
 - `markdown_report`：Markdown 版本报告
 - `eval_report`：Agent 执行评估
 - `trace_events`：完整 workflow trace
-- `tool_context`：外部工具查询结果和来源
-- `metadata`：LLM、工具、fallback 等执行元数据
+- `tool_context`：从手动输入中提取出的本地证据
+- `metadata`：LLM、fallback、retrieval 等执行元数据
+
+### 手动反馈入库
+
+```http
+POST /feedback/ingest
+Content-Type: application/json
+```
+
+示例请求：
+
+```json
+{
+  "source_name": "ops-console",
+  "raw_content": "ERROR checkout-api DatabaseConnectionTimeout token=secret123 from 10.1.2.3",
+  "note": "Captured after manual investigation."
+}
+```
+
+该接口会：
+
+- 自动识别反馈类型
+- 基础脱敏
+- 提取关键信号
+- 写入 `docs/feedback/*.md`
+- 同步到 `backend/data/knowledge_base/manual_feedback.json`
+- 刷新 Chroma RAG 索引
 
 ### 历史记录
 
@@ -323,6 +324,37 @@ POST /incidents/{incident_id}/reject
 }
 ```
 
+## 手动反馈入库设计
+
+`docs/` 目录主要用于人类阅读的项目文档和脱敏排障记录。为了让 Agent 也能利用这些经验，系统新增了 Manual Feedback Ingestion Agent。
+
+推荐流程：
+
+```text
+手动复制系统反馈 / 报错 / 排障记录
+        ↓
+前端 Manual Feedback 区域粘贴并保存
+        ↓
+Feedback Ingestion Agent 分类、脱敏、结构化
+        ↓
+生成 docs/feedback/*.md
+        ↓
+写入 backend/data/knowledge_base/manual_feedback.json
+        ↓
+Knowledge Agent 通过 Chroma RAG 检索
+```
+
+当前支持识别的类型：
+
+- `error_log`
+- `metric_snapshot`
+- `incident_report`
+- `runbook`
+- `deployment_note`
+- `unknown`
+
+注意：自动脱敏是基础规则，提交真实材料前仍建议人工复查。
+
 ## RAG 设计
 
 知识库目录：
@@ -335,6 +367,7 @@ backend/data/knowledge_base/
 
 - JSON incident cases
 - Markdown runbook
+- Manual feedback records
 - Chroma vector search
 - deterministic local embedding
 - keyword fallback
@@ -347,35 +380,6 @@ backend/data/chroma/
 ```
 
 该目录已被 `.gitignore` 排除。
-
-## 外部工具设计
-
-外部工具采用统一策略：
-
-```text
-real HTTP client -> mock fallback
-```
-
-也就是说：
-
-- 配置真实工具时，系统优先请求真实 API
-- 请求失败时，记录 `tool_errors`，然后回退 mock
-- 没有配置真实工具时，直接使用 mock，不视为错误
-
-当前工具：
-
-| 工具 | 用途 | 配置 |
-| --- | --- | --- |
-| Prometheus | 查询服务指标，如错误率、延迟、连接池使用率 | `PROMETHEUS_BASE_URL` |
-| Loki | 查询日志流 | `LOKI_BASE_URL` |
-| Elasticsearch | 查询结构化日志 | `ELASTICSEARCH_BASE_URL` |
-| GitHub | 查询最近 commit history | `GITHUB_REPOSITORY` |
-
-前端 Tools tab 会显示每类工具结果的来源：
-
-- `real`
-- `mock`
-- `mock_fallback`
 
 ## LLM 设计
 
@@ -406,9 +410,10 @@ LLM metadata 会进入 trace / eval：
 前端包含：
 
 - Incident 输入面板
+- Manual Feedback 保存入口
 - Run History
 - Incident Report
-- Tools tab
+- Evidence tab
 - Trace tab
 - Eval tab
 - LLM status tab
@@ -436,7 +441,7 @@ npm run build
 - workflow 端到端测试
 - LLM agent JSON schema 测试
 - Chroma RAG 测试
-- external tools HTTP client 解析测试
+- manual feedback ingestion 测试
 - history / trace / approval API 测试
 
 ## 数据与安全
@@ -452,10 +457,12 @@ npm run build
 当前安全边界：
 
 - `.env` 不入库
-- API key / token 不通过 status API 明文返回
+- API key 不通过 status API 明文返回
 - strict privacy mode 下不向外部 LLM 发送 raw logs 和完整知识库正文
+- 手动反馈入库会进行基础脱敏
 - 高风险修复计划需要人工审批
 - 系统只生成修复建议，不自动执行生产修复命令
+- 系统不会主动连接真实生产系统排查
 
 ## 当前边界
 
@@ -463,6 +470,7 @@ npm run build
 
 当前未做：
 
+- 自动进入真实系统排查
 - 认证和权限
 - 多租户隔离
 - 生产级日志脱敏

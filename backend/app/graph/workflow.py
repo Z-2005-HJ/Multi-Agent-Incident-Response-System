@@ -15,7 +15,7 @@ from app.eval.adapter import generate_eval_report, traced_node
 from app.graph.state import IncidentState
 from app.reports.markdown import render_markdown_report
 from app.schemas.incident import IncidentReport, IncidentRequest, IncidentRunResult
-from app.tools.external_tools import collect_external_tool_context
+from app.tools.manual_evidence_tools import collect_manual_evidence_context
 
 
 def ingest_node(state: IncidentState) -> dict:
@@ -35,31 +35,31 @@ def metric_node(state: IncidentState) -> dict:
     return {"metric_analysis": analyze_metrics(state["request"])}
 
 
-def external_tools_node(state: IncidentState) -> dict:
-    tool_context = collect_external_tool_context(state["request"])
+def manual_evidence_node(state: IncidentState) -> dict:
+    tool_context = collect_manual_evidence_context(state["request"])
     tool_calls = [
         {
-            "name": "prometheus",
-            "source": tool_context.tool_sources.get("prometheus", "unknown"),
-            "status": "fallback" if tool_context.tool_sources.get("prometheus") == "mock_fallback" else "ok",
-            "result_count": len(tool_context.prometheus_findings),
+            "name": "manual_metric_evidence",
+            "source": tool_context.tool_sources.get("metrics", "unknown"),
+            "status": "ok",
+            "result_count": len(tool_context.metric_findings),
         },
         {
-            "name": "log_search",
-            "source": tool_context.tool_sources.get("log_search", "unknown"),
-            "status": "fallback" if tool_context.tool_sources.get("log_search") == "mock_fallback" else "ok",
+            "name": "manual_log_evidence",
+            "source": tool_context.tool_sources.get("logs", "unknown"),
+            "status": "ok",
             "result_count": len(tool_context.log_search_hits),
         },
         {
-            "name": "github",
-            "source": tool_context.tool_sources.get("github", "unknown"),
-            "status": "fallback" if tool_context.tool_sources.get("github") == "mock_fallback" else "ok",
+            "name": "manual_deployment_clues",
+            "source": tool_context.tool_sources.get("deployment", "unknown"),
+            "status": "ok",
             "result_count": len(tool_context.deployment_events),
         },
     ]
     metadata = dict(state.get("metadata", {}))
-    metadata["external_tools"] = {
-        "prometheus_findings": len(tool_context.prometheus_findings),
+    metadata["manual_evidence"] = {
+        "metric_findings": len(tool_context.metric_findings),
         "log_search_hits": len(tool_context.log_search_hits),
         "deployment_events": len(tool_context.deployment_events),
         "tool_sources": tool_context.tool_sources,
@@ -143,7 +143,7 @@ def final_report_node(state: IncidentState) -> dict:
         for item in metric_analysis.metric_anomalies
     )
     if tool_context:
-        signals.extend(item.summary for item in tool_context.prometheus_findings)
+        signals.extend(item.summary for item in tool_context.metric_findings)
         signals.extend(f"log_search:{item.level} {item.message}" for item in tool_context.log_search_hits[:4])
         signals.extend(f"deployment:{item.version} {', '.join(item.risk_flags)}" for item in tool_context.deployment_events)
     summary = (
@@ -166,17 +166,17 @@ def final_report_node(state: IncidentState) -> dict:
         sources=[
             *knowledge_results.source_references,
             *(
-                [f"prometheus_{tool_context.tool_sources.get('prometheus', 'unknown')}"]
-                if tool_context and tool_context.prometheus_findings
+                [f"manual_metrics_{tool_context.tool_sources.get('metrics', 'unknown')}"]
+                if tool_context and tool_context.metric_findings
                 else []
             ),
             *(
-                [f"log_search_{tool_context.tool_sources.get('log_search', 'unknown')}"]
+                [f"manual_logs_{tool_context.tool_sources.get('logs', 'unknown')}"]
                 if tool_context and tool_context.log_search_hits
                 else []
             ),
             *(
-                [f"github_{tool_context.tool_sources.get('github', 'unknown')}"]
+                [f"manual_deployment_{tool_context.tool_sources.get('deployment', 'unknown')}"]
                 if tool_context and tool_context.deployment_events
                 else []
             ),
@@ -200,7 +200,7 @@ def build_workflow():
     graph.add_node("ingest_incident", traced_node("ingest_incident", "ingest", ingest_node))
     graph.add_node("log_analysis", traced_node("log_analysis", "log_analyst", log_node))
     graph.add_node("metric_analysis", traced_node("metric_analysis", "metric_analyst", metric_node))
-    graph.add_node("external_tools", traced_node("external_tools", "tool_adapter", external_tools_node))
+    graph.add_node("manual_evidence", traced_node("manual_evidence", "evidence_adapter", manual_evidence_node))
     graph.add_node("knowledge_retrieval", traced_node("knowledge_retrieval", "knowledge_agent", knowledge_node))
     graph.add_node("root_cause_analysis", traced_node("root_cause_analysis", "root_cause_agent", root_cause_node))
     graph.add_node("fix_planning", traced_node("fix_planning", "fix_planner", fix_plan_node))
@@ -211,8 +211,8 @@ def build_workflow():
     graph.add_edge(START, "ingest_incident")
     graph.add_edge("ingest_incident", "log_analysis")
     graph.add_edge("log_analysis", "metric_analysis")
-    graph.add_edge("metric_analysis", "external_tools")
-    graph.add_edge("external_tools", "knowledge_retrieval")
+    graph.add_edge("metric_analysis", "manual_evidence")
+    graph.add_edge("manual_evidence", "knowledge_retrieval")
     graph.add_edge("knowledge_retrieval", "root_cause_analysis")
     graph.add_edge("root_cause_analysis", "fix_planning")
     graph.add_edge("fix_planning", "review")

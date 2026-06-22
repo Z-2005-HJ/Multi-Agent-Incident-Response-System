@@ -47,18 +47,40 @@ def test_llm_status_does_not_expose_api_key() -> None:
     assert payload["privacy_mode"] == "strict"
 
 
-def test_tools_status_does_not_expose_tokens() -> None:
+def test_feedback_ingest_api(monkeypatch) -> None:
     client = TestClient(app)
 
-    response = client.get("/tools/status")
+    def fake_ingest(request):
+        from app.schemas.incident import StructuredFeedbackDocument
+
+        return StructuredFeedbackDocument(
+            feedback_id="fb_test",
+            feedback_type="error_log",
+            title="Error Log - test-console",
+            summary="test summary",
+            key_signals=["ERROR checkout-api"],
+            suspected_components=["database"],
+            sanitized_content="ERROR checkout-api token=<redacted> from <ip>",
+            doc_path="docs/feedback/fb_test.md",
+            knowledge_source_id="manual_feedback_fb_test",
+        )
+
+    monkeypatch.setattr("app.api.routes.ingest_manual_feedback", fake_ingest)
+    response = client.post(
+        "/feedback/ingest",
+        json={
+            "source_name": "test-console",
+            "raw_content": "ERROR checkout-api token=secret123 DatabaseConnectionTimeout from 10.1.2.3",
+            "note": "test note",
+        },
+    )
 
     assert response.status_code == 200
     payload = response.json()
-    serialized = json.dumps(payload)
-    assert "api_key" not in serialized.lower()
-    assert "token_configured" in serialized
-    assert "prometheus" in payload
-    assert "github" in payload
+    assert payload["feedback_type"] == "error_log"
+    assert "secret123" not in payload["sanitized_content"]
+    assert "<ip>" in payload["sanitized_content"]
+    assert payload["knowledge_source_id"].startswith("manual_feedback_")
 
 
 def test_history_trace_and_approval_api() -> None:
