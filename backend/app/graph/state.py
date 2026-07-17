@@ -4,12 +4,13 @@ from typing import Any, TypedDict
 
 from app.schemas.incident import (
     EvalReport,
-    ExternalToolContext,
+    DeploymentAnalysis,
     FixPlan,
     IncidentReport,
     IncidentRequest,
     KnowledgeResults,
     LogAnalysis,
+    ManualEvidenceContext,
     MetricAnalysis,
     ReviewResult,
     RootCauseAnalysis,
@@ -20,10 +21,16 @@ from app.schemas.incident import (
 class IncidentState(TypedDict, total=False):
     incident_id: str
     trace_id: str
+    current_node: str
+    completed_nodes: list[str]
+    last_checkpoint_id: str
+    pending_human_input: dict[str, Any]
+    node_attempts: dict[str, int]
     request: IncidentRequest
     log_analysis: LogAnalysis
     metric_analysis: MetricAnalysis
-    tool_context: ExternalToolContext
+    deployment_analysis: DeploymentAnalysis
+    evidence_context: ManualEvidenceContext
     knowledge_results: KnowledgeResults
     root_cause_analysis: RootCauseAnalysis
     fix_plan: FixPlan

@@ -8,10 +8,10 @@ from app.prompts.loader import load_prompt, prompt_version
 from app.schemas.incident import (
     KnowledgeResults,
     LogAnalysis,
+    ManualEvidenceContext,
     MetricAnalysis,
     RootCauseAnalysis,
     RootCauseHypothesis,
-    ExternalToolContext,
 )
 from pydantic import ValidationError
 
@@ -27,7 +27,7 @@ def _root_cause_payload(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-    tool_context: ExternalToolContext | None = None,
+    evidence_context: ManualEvidenceContext | None = None,
 ) -> dict[str, Any]:
     settings = get_llm_settings()
     if settings.privacy_mode == "strict":
@@ -46,19 +46,19 @@ def _root_cause_payload(
                 "retrieval_mode": knowledge_results.retrieval_mode,
                 "retrieval_confidence": knowledge_results.retrieval_confidence,
             },
-            "manual_evidence_context": _strict_manual_evidence_context(tool_context),
+            "manual_evidence_context": _strict_manual_evidence_context(evidence_context),
         }
     return {
         "privacy_mode": settings.privacy_mode,
         "log_analysis": log_analysis.model_dump(mode="json"),
         "metric_analysis": metric_analysis.model_dump(mode="json"),
         "knowledge_results": knowledge_results.model_dump(mode="json"),
-        "manual_evidence_context": tool_context.model_dump(mode="json") if tool_context else {},
+        "manual_evidence_context": evidence_context.model_dump(mode="json") if evidence_context else {},
     }
 
 
-def _strict_manual_evidence_context(tool_context: ExternalToolContext | None) -> dict[str, Any]:
-    if tool_context is None:
+def _strict_manual_evidence_context(evidence_context: ManualEvidenceContext | None) -> dict[str, Any]:
+    if evidence_context is None:
         return {}
     return {
         "metric_findings": [
@@ -69,10 +69,10 @@ def _strict_manual_evidence_context(tool_context: ExternalToolContext | None) ->
                 "severity": item.severity,
                 "summary": item.summary,
             }
-            for item in tool_context.metric_findings
+            for item in evidence_context.metric_findings
         ],
-        "log_evidence_hit_count": len(tool_context.log_search_hits),
-        "log_matched_terms": sorted({term for hit in tool_context.log_search_hits for term in hit.matched_terms}),
+        "log_evidence_hit_count": len(evidence_context.log_evidence_hits),
+        "log_matched_terms": sorted({term for hit in evidence_context.log_evidence_hits for term in hit.matched_terms}),
         "deployment_events": [
             {
                 "service_name": item.service_name,
@@ -81,9 +81,9 @@ def _strict_manual_evidence_context(tool_context: ExternalToolContext | None) ->
                 "risk_flags": item.risk_flags,
                 "summary": item.summary,
             }
-            for item in tool_context.deployment_events
+            for item in evidence_context.deployment_events
         ],
-        "tool_errors": tool_context.tool_errors,
+        "evidence_errors": evidence_context.evidence_errors,
     }
 
 
@@ -91,9 +91,9 @@ def infer_root_cause(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-    tool_context: ExternalToolContext | None = None,
+    evidence_context: ManualEvidenceContext | None = None,
 ) -> RootCauseAnalysis:
-    result, _metadata = infer_root_cause_with_metadata(log_analysis, metric_analysis, knowledge_results, tool_context)
+    result, _metadata = infer_root_cause_with_metadata(log_analysis, metric_analysis, knowledge_results, evidence_context)
     return result
 
 
@@ -101,11 +101,11 @@ def infer_root_cause_with_metadata(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-    tool_context: ExternalToolContext | None = None,
+    evidence_context: ManualEvidenceContext | None = None,
 ) -> tuple[RootCauseAnalysis, dict[str, Any]]:
     try:
         client = OpenAICompatibleClient()
-        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results, tool_context, client=client), {
+        return infer_root_cause_with_llm(log_analysis, metric_analysis, knowledge_results, evidence_context, client=client), {
             "execution_mode": "llm",
             "fallback_reason": None,
             **_llm_metadata(client, "root_cause.md"),
@@ -113,9 +113,10 @@ def infer_root_cause_with_metadata(
     except (LLMError, ValidationError) as exc:
         client = locals().get("client")
         llm_error_metadata = dict(getattr(client, "last_call_metadata", {}))
-        return infer_root_cause_rule(log_analysis, metric_analysis, knowledge_results, tool_context), {
+        return infer_root_cause_rule(log_analysis, metric_analysis, knowledge_results, evidence_context), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            **llm_error_metadata,
             "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
             "privacy_mode": get_llm_settings().privacy_mode,
             "prompt_version": prompt_version("root_cause.md"),
@@ -126,14 +127,14 @@ def infer_root_cause_with_llm(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-    tool_context: ExternalToolContext | None = None,
+    evidence_context: ManualEvidenceContext | None = None,
     client: OpenAICompatibleClient | None = None,
 ) -> RootCauseAnalysis:
     llm = client or OpenAICompatibleClient()
     if not llm.is_enabled():
         raise LLMError("LLM is disabled.")
 
-    payload = _root_cause_payload(log_analysis, metric_analysis, knowledge_results, tool_context)
+    payload = _root_cause_payload(log_analysis, metric_analysis, knowledge_results, evidence_context)
     data = llm.json_chat(
         [
             {"role": "system", "content": load_prompt("root_cause.md")},
@@ -151,7 +152,7 @@ def infer_root_cause_rule(
     log_analysis: LogAnalysis,
     metric_analysis: MetricAnalysis,
     knowledge_results: KnowledgeResults,
-    tool_context: ExternalToolContext | None = None,
+    evidence_context: ManualEvidenceContext | None = None,
 ) -> RootCauseAnalysis:
     evidence: list[str] = []
     evidence.extend(log_analysis.important_log_lines[:3])
@@ -160,9 +161,9 @@ def infer_root_cause_rule(
         for item in metric_analysis.metric_anomalies[:3]
     )
     evidence.extend(f"knowledge:{source}" for source in knowledge_results.source_references[:3])
-    if tool_context:
-        evidence.extend(item.summary for item in tool_context.metric_findings[:3])
-        evidence.extend(f"deployment:{item.version} flags={','.join(item.risk_flags)}" for item in tool_context.deployment_events[:2])
+    if evidence_context:
+        evidence.extend(item.summary for item in evidence_context.metric_findings[:3])
+        evidence.extend(f"deployment:{item.version} flags={','.join(item.risk_flags)}" for item in evidence_context.deployment_events[:2])
 
     hypotheses: list[RootCauseHypothesis] = []
     components = set(log_analysis.suspected_components)
@@ -189,7 +190,11 @@ def infer_root_cause_rule(
             )
         )
 
-    if tool_context and any("recent_deployment" in item.risk_flags for item in tool_context.deployment_events):
+    if evidence_context and any(
+        flag in {"change_window_signal", "manual_deployment_signal"}
+        for item in evidence_context.deployment_events
+        for flag in item.risk_flags
+    ):
         hypotheses.append(
             RootCauseHypothesis(
                 cause="A recent deployment may have introduced a risky runtime or dependency configuration change.",
@@ -215,8 +220,8 @@ def infer_root_cause_rule(
         missing.append("No related knowledge base item was retrieved.")
     if not metric_analysis.metric_anomalies:
         missing.append("No structured metric anomaly was detected.")
-    if tool_context and tool_context.tool_errors:
-        missing.extend(tool_context.tool_errors)
+    if evidence_context and evidence_context.evidence_errors:
+        missing.extend(evidence_context.evidence_errors)
 
     return RootCauseAnalysis(
         root_cause_hypotheses=hypotheses,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
+#计算指标波动
 def numeric_delta(value: Any) -> tuple[float | int | None, float | int | None, float | None]:
     if not isinstance(value, dict):
         return None, None, None
@@ -14,7 +14,7 @@ def numeric_delta(value: Any) -> tuple[float | int | None, float | int | None, f
         return before, after, None
     return before, after, round((after - before) / abs(before), 3)
 
-
+#计算指标严重等级
 def metric_severity(metric_name: str, change_ratio: float | None, after: float | int | None) -> str:
     if change_ratio is None:
         return "low"

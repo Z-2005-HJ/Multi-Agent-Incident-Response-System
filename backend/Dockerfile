@@ -9,10 +9,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 COPY data ./data
 COPY run_server.py .
 
 EXPOSE 8000
 
 CMD ["python", "run_server.py"]
-

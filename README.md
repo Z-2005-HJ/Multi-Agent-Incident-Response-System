@@ -19,23 +19,12 @@
 - deterministic local embedding，不依赖外部 embedding API
 - 手动日志、指标、告警内容的本地证据提取
 - Manual Feedback Ingestion Agent：识别手动上传的系统反馈类型，脱敏、结构化并写入文档
-- SQLite 运行历史、报告和 trace 持久化
-- Eval Adapter，记录 Agent 执行、LLM token、latency、fallback 等信息
+- PostgreSQL 运行历史、报告、trace 与 workflow job 持久化
+- observability / tracing & evaluation layer，保留 trace、评估、LLM token、latency、fallback 等能力，并新增 Prometheus 指标导出
 - Human approval API，支持高风险修复计划 approve / reject
+- SaaS / governance layer：多租户 API key、租户级 request / workflow quota、audit events、production config approval 与 release gate
 - Dockerfile 和 docker-compose
 - 后端 pytest 测试与前端生产构建
-
-暂未实现：
-
-- 自动连接真实生产系统排查
-- Prometheus / Loki / Elasticsearch / GitHub 自动查询 client
-- 用户认证和权限系统
-- Slack / 飞书通知
-- 云部署和 GitHub Actions CI
-- 自动执行真实生产修复命令
-- LLM-as-judge 评估
-- LangGraph checkpoint / interrupt 持久化
-- 多服务依赖图分析
 
 ## 系统架构
 
@@ -52,7 +41,7 @@ flowchart LR
     H --> I["Fix Planner"]
     I --> J["Reviewer"]
     J --> K["Report Generator"]
-    K --> L["Eval Adapter"]
+    K --> L["Observability / Tracing & Evaluation Layer"]
 
     P["Manual Feedback Upload"] --> Q["Feedback Ingestion Agent"]
     Q --> R["docs/feedback"]
@@ -64,8 +53,11 @@ flowchart LR
     I --> U
     J --> U
 
-    L --> V["SQLite"]
+    L --> V["PostgreSQL"]
     K --> V
+    B --> X["Redis Queue / Worker"]
+    X --> V
+    X --> Y["Dead Letter Queue"]
     B --> W["React Console"]
 ```
 
@@ -81,7 +73,7 @@ flowchart LR
 | Fix Planner | 生成诊断步骤、修复建议、回滚计划、验证步骤 | `FixPlan` |
 | Reviewer | 审核证据链、风险和修复计划质量 | `ReviewResult` |
 | Feedback Ingestion Agent | 对手动上传的系统反馈进行分类、脱敏、结构化和文档沉淀 | `StructuredFeedbackDocument` |
-| Eval Adapter | 采集 trace、latency、fallback、token、retrieval result 等可观测信息 | `EvalReport` |
+| Observability / Tracing & Evaluation Layer | 保留 trace、latency、fallback、token、retrieval result 等可观测能力，并输出 Prometheus metrics | `EvalReport` |
 
 ## 技术栈
 
@@ -93,7 +85,10 @@ flowchart LR
 - Pydantic v2
 - httpx
 - ChromaDB
-- SQLite
+- PostgreSQL
+- Redis
+- SQLAlchemy Async
+- Multi-tenant API keys / quotas / audit events
 - pytest
 
 前端：
@@ -116,14 +111,15 @@ flowchart LR
 │   ├── app/
 │   │   ├── agents/          # Agent 实现
 │   │   ├── api/             # FastAPI routes
-│   │   ├── eval/            # Eval Adapter 和 trace
+│   │   ├── eval/            # tracing & evaluation 逻辑
 │   │   ├── graph/           # LangGraph workflow 和 state
 │   │   ├── knowledge/       # Chroma RAG、embedding、keyword fallback
 │   │   ├── llm/             # OpenAI-compatible LLM client
+│   │   ├── observability.py # Prometheus metrics 与 observability helpers
 │   │   ├── prompts/         # LLM prompt templates
 │   │   ├── reports/         # Markdown report renderer
 │   │   ├── schemas/         # Pydantic schemas
-│   │   ├── storage/         # SQLite persistence
+│   │   ├── storage/         # PostgreSQL / async persistence
 │   │   └── tools/           # 本地证据提取工具
 │   ├── data/
 │   │   ├── knowledge_base/  # 本地 incident / runbook / manual feedback 知识库
@@ -134,6 +130,9 @@ flowchart LR
 │   └── feedback/            # 手动反馈入库后生成的脱敏 Markdown
 ├── frontend/
 │   └── src/
+├── monitoring/
+│   ├── prometheus/
+│   └── grafana/
 ├── docker-compose.yml
 └── README.md
 ```
@@ -178,6 +177,8 @@ LLM_PRIVACY_MODE=strict
 - `LLM_MODE=mock`：只使用规则和 mock，适合本地 demo
 - 配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 后，系统会优先调用真实 LLM
 - `LLM_PRIVACY_MODE=strict`：默认不向外部 LLM 发送 raw logs 和完整知识库正文
+- 后端现在只支持 PostgreSQL；本地启动前请先准备可访问的 `APP_DATABASE_URL`
+- `APP_REDIS_URL` 不是同步 `/incidents/run` 的必需项，但异步 job / worker / retry / DLQ 依赖 Redis
 
 ### 3. 启动后端
 
@@ -216,6 +217,15 @@ docker-compose up --build
 
 - Backend: `http://127.0.0.1:8000`
 - Frontend: `http://127.0.0.1:5173`
+- PostgreSQL: `127.0.0.1:5432`
+- Redis: `127.0.0.1:6379`
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000`
+
+Grafana 默认账号：
+
+- Username: `admin`
+- Password: `admin`
 
 ## API
 
@@ -232,6 +242,21 @@ GET /llm/status
 ```
 
 返回是否配置 base URL、API key、模型名和隐私模式。不会返回 API key 明文。
+
+### Prometheus Metrics
+
+```http
+GET /metrics
+```
+
+该端点由 observability / tracing & evaluation layer 导出，当前覆盖：
+
+- HTTP 请求总数与时延
+- workflow run 总数与时延
+- workflow job 入队、执行、重试与 dead letter 事件
+- agent / node 执行总数与时延
+- feedback ingest 总数与时延
+- LLM 调用次数、token 使用量与延迟
 
 ### 运行 Incident 分析
 
@@ -271,7 +296,7 @@ Content-Type: application/json
 - `markdown_report`：Markdown 版本报告
 - `eval_report`：Agent 执行评估
 - `trace_events`：完整 workflow trace
-- `tool_context`：从手动输入中提取出的本地证据
+- `evidence_context`：从手动输入中提取出的本地证据
 - `metadata`：LLM、fallback、retrieval 等执行元数据
 
 ### 手动反馈入库
@@ -307,6 +332,31 @@ GET /incidents
 GET /incidents/{incident_id}
 GET /incidents/{incident_id}/trace
 ```
+
+### Workflow Job Queue
+
+```http
+POST /incidents/submit
+GET /jobs/{job_id}
+```
+
+`/incidents/submit` 会把 incident workflow 提交到 Redis 队列，由独立 worker 异步执行。
+`/jobs/{job_id}` 可查看 `queued`、`running`、`retry_scheduled`、`completed`、`failed`、`dead_letter` 状态，以及重试次数、下次重试时间、trace / run 关联信息。
+
+### SaaS / Governance
+
+```http
+POST /admin/tenants
+POST /admin/tenants/{tenant_id}/keys
+GET /tenant/quota
+GET /tenant/audit-events
+POST /admin/config-approvals
+POST /admin/config-approvals/{approval_id}/approve
+```
+
+- `APP_ADMIN_API_TOKEN` 用于平台级 SaaS / 治理接口
+- tenant API key 支持 scope、quota 与审计
+- `APP_OPERATIONS_MODE=production` 时，`/incidents/run` 和 `/incidents/submit` 需要 `X-Release-Approval`
 
 ### 人工审批
 
@@ -392,7 +442,7 @@ Root Cause Agent、Fix Planner Agent、Reviewer Agent 会优先调用真实 LLM�
 - LLM 超时
 - LLM 返回 JSON 不符合 Pydantic schema
 
-LLM metadata 会进入 trace / eval：
+LLM metadata 会进入 observability / tracing & evaluation layer：
 
 - provider
 - model
@@ -428,6 +478,10 @@ cd backend
 ..\.venv\Scripts\python.exe -m pytest -q
 ```
 
+说明：
+- workflow 测试可在无数据库的情况下运行
+- API 集成测试需要可访问的 PostgreSQL；若本机未启动 PostgreSQL，会自动跳过
+
 运行前端构建：
 
 ```powershell
@@ -438,6 +492,7 @@ npm run build
 当前测试覆盖：
 
 - API smoke test
+- `/metrics` 可访问性测试
 - workflow 端到端测试
 - LLM agent JSON schema 测试
 - Chroma RAG 测试
@@ -449,7 +504,6 @@ npm run build
 默认不会提交以下本地数据：
 
 - `backend/.env`
-- `backend/data/incidents.db`
 - `backend/data/chroma/`
 - `frontend/node_modules/`
 - `frontend/dist/`

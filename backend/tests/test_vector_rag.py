@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from pathlib import Path
-from uuid import uuid4
 
 from app.knowledge.vector_store import build_or_refresh_index, search_knowledge_vector
 
 
 def test_chroma_vector_rag_retrieves_related_document() -> None:
-    workspace_tmp = Path(__file__).resolve().parents[2] / ".test-data" / f"vector_rag_{uuid4().hex}"
+    workspace_tmp = Path(tempfile.mkdtemp(prefix="vector_rag_"))
     knowledge_path = workspace_tmp / "knowledge"
     chroma_path = workspace_tmp / "chroma"
     try:

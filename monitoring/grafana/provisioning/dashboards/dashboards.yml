@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: incident-response-observability
+    orgId: 1
+    folder: Incident Response
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

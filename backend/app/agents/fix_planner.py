@@ -35,6 +35,7 @@ def plan_fix_with_metadata(root_cause_analysis: RootCauseAnalysis) -> tuple[FixP
         return plan_fix_rule(root_cause_analysis), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            **llm_error_metadata,
             "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
             "privacy_mode": get_llm_settings().privacy_mode,
             "prompt_version": prompt_version("fix_planner.md"),

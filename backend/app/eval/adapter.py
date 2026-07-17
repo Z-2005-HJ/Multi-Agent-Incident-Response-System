@@ -6,6 +6,7 @@ from typing import Any, Callable
 from pydantic import BaseModel
 
 from app.graph.state import IncidentState
+from app.observability import record_node_execution
 from app.schemas.incident import EvalReport, TraceEvent
 
 
@@ -24,16 +25,29 @@ def state_snapshot(state: IncidentState) -> dict[str, Any]:
         "incident_id",
         "trace_id",
         "status",
+        "current_node",
+        "completed_nodes",
         "log_analysis",
         "metric_analysis",
-        "tool_context",
+        "deployment_analysis",
+        "evidence_context",
         "knowledge_results",
         "root_cause_analysis",
         "fix_plan",
         "review_result",
         "metadata",
     ]
-    return {key: _jsonable(state[key]) for key in keys if key in state}
+    snapshot = {key: _jsonable(state[key]) for key in keys if key in state}
+    metadata = snapshot.get("metadata")
+    if isinstance(metadata, dict):
+        runtime = metadata.get("runtime")
+        if isinstance(runtime, dict):
+            runtime = dict(runtime)
+            runtime.pop("resume_state", None)
+            metadata = dict(metadata)
+            metadata["runtime"] = runtime
+            snapshot["metadata"] = metadata
+    return snapshot
 
 
 def traced_node(
@@ -76,12 +90,25 @@ def traced_node(
                 llm_error_type=agent_info.get("llm_error_type"),
                 prompt_version=agent_info.get("prompt_version"),
                 privacy_mode=agent_info.get("privacy_mode"),
-                tool_calls=metadata.get("tool_calls", []) if agent_name == "evidence_adapter" else [],
+                evidence_observations=metadata.get("evidence_observations", []),
+            )
+            record_node_execution(
+                node_name=node_name,
+                agent_name=agent_name,
+                status="success",
+                duration_seconds=duration_ms / 1000.0,
+                execution_metadata=agent_info,
             )
             output["trace_events"] = existing_events + [start, end]
             return output
         except Exception as exc:  # pragma: no cover - defensive path
             duration_ms = int((time.perf_counter() - started_at) * 1000)
+            record_node_execution(
+                node_name=node_name,
+                agent_name=agent_name,
+                status="error",
+                duration_seconds=duration_ms / 1000.0,
+            )
             error = TraceEvent(
                 trace_id=trace_id,
                 node_name=node_name,
@@ -131,6 +158,12 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
             if value is not None:
                 agent_scores[event.agent_name][key] = value
 
+    error_events = [event for event in events if event.event_type == "error"]
+    if error_events:
+        agent_scores.setdefault("runtime", {})["error_categories"] = [event.error_category or "unknown" for event in error_events]
+        agent_scores["runtime"]["retryable_errors"] = sum(1 for event in error_events if event.retryable)
+        agent_scores["runtime"]["error_attempts"] = [event.attempt for event in error_events]
+
     knowledge = state.get("knowledge_results")
     if knowledge:
         agent_scores.setdefault("knowledge_agent", {})["retrieval_hit_count"] = len(knowledge.source_references)
@@ -141,19 +174,27 @@ def generate_eval_report(state: IncidentState) -> EvalReport:
         if knowledge.retrieval_error:
             agent_scores["knowledge_agent"]["retrieval_error"] = knowledge.retrieval_error
 
-    tool_context = state.get("tool_context")
-    if tool_context:
-        agent_scores.setdefault("evidence_adapter", {})["metric_findings"] = len(tool_context.metric_findings)
-        agent_scores["evidence_adapter"]["log_evidence_hits"] = len(tool_context.log_search_hits)
-        agent_scores["evidence_adapter"]["deployment_clues"] = len(tool_context.deployment_events)
-        agent_scores["evidence_adapter"]["evidence_sources"] = tool_context.tool_sources
-        agent_scores["evidence_adapter"]["evidence_errors"] = tool_context.tool_errors
+    evidence_context = state.get("evidence_context")
+    if evidence_context:
+        agent_scores.setdefault("standardized_evidence", {})["metric_findings"] = len(evidence_context.metric_findings)
+        agent_scores["standardized_evidence"]["log_evidence_hits"] = len(evidence_context.log_evidence_hits)
+        agent_scores["standardized_evidence"]["deployment_clues"] = len(evidence_context.deployment_events)
+        agent_scores["standardized_evidence"]["evidence_sources"] = evidence_context.evidence_sources
+        agent_scores["standardized_evidence"]["evidence_errors"] = evidence_context.evidence_errors
 
     root = state.get("root_cause_analysis")
     if root:
         evidence_total = sum(len(item.evidence) for item in root.root_cause_hypotheses)
         agent_scores.setdefault("root_cause_agent", {})["hypothesis_count"] = len(root.root_cause_hypotheses)
         agent_scores["root_cause_agent"]["evidence_coverage"] = round(min(evidence_total / 5, 1.0), 2)
+
+    runtime = state.get("metadata", {}).get("runtime", {})
+    if runtime:
+        agent_scores.setdefault("runtime", {})["completed_nodes"] = runtime.get("completed_nodes", [])
+        agent_scores["runtime"]["current_node"] = runtime.get("current_node")
+        agent_scores["runtime"]["recoverable"] = bool(runtime.get("recoverable", False))
+        if runtime.get("pending_human_input"):
+            agent_scores["runtime"]["pending_human_input"] = runtime["pending_human_input"]
 
     risks: list[str] = []
     fix_plan = state.get("fix_plan")

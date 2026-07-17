@@ -79,7 +79,7 @@ type IncidentResult = {
     recommendations: string[];
   };
   trace_events: TraceEvent[];
-  tool_context?: {
+  evidence_context?: {
     metric_findings: Array<{
       metric_name: string;
       query: string;
@@ -88,7 +88,7 @@ type IncidentResult = {
       severity: string;
       summary: string;
     }>;
-    log_search_hits: Array<{
+    log_evidence_hits: Array<{
       timestamp?: string | null;
       source: string;
       level: string;
@@ -105,12 +105,12 @@ type IncidentResult = {
       summary: string;
       risk_flags: string[];
     }>;
-    tool_sources: Record<string, string>;
-    tool_errors: string[];
+    evidence_sources: Record<string, string>;
+    evidence_errors: string[];
   } | null;
   metadata: {
     agent_execution?: Record<string, { execution_mode?: string; fallback_reason?: string | null }>;
-    manual_evidence?: Record<string, unknown>;
+    standardized_evidence?: Record<string, unknown>;
   };
 };
 
@@ -144,7 +144,55 @@ type FeedbackResult = {
   knowledge_source_id: string;
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const STATIC_API_TOKEN = (import.meta.env.VITE_API_TOKEN ?? import.meta.env.VITE_DEMO_API_TOKEN)?.trim();
+const RELEASE_APPROVAL_ID = import.meta.env.VITE_RELEASE_APPROVAL_ID?.trim();
+const AUTH_STORAGE_KEY = "incident-response-access-token";
+
+type AuthContext = {
+  actor_type: "tenant_key" | "admin" | "demo" | "user";
+  actor_id: string;
+  tenant_id?: string | null;
+  tenant_name?: string | null;
+  email?: string | null;
+  full_name?: string | null;
+  role?: "viewer" | "operator" | "approver" | "admin" | null;
+  scopes: string[];
+  operations_mode: string;
+};
+
+function getStoredToken() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(AUTH_STORAGE_KEY)?.trim() ?? "";
+}
+
+function setStoredToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) {
+    window.localStorage.setItem(AUTH_STORAGE_KEY, token);
+  } else {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
+
+function getActiveToken() {
+  return STATIC_API_TOKEN || getStoredToken();
+}
+
+async function apiFetch(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers ?? {});
+  const token = getActiveToken();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (RELEASE_APPROVAL_ID && (path === "/incidents/run" || path === "/incidents/submit")) {
+    headers.set("X-Release-Approval", RELEASE_APPROVAL_ID);
+  }
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+  });
+}
 
 const sampleLogs = `2026-06-18T10:21:03Z ERROR checkout-api DatabaseConnectionTimeout while acquiring database connection
 2026-06-18T10:21:04Z ERROR checkout-api failed to acquire connection from pool
@@ -166,6 +214,10 @@ const sampleMetrics = `{
   }
 }`;
 
+const sampleChange = `Deployment completed for checkout-api shortly before the alert.
+Commit touched database connection pool configuration.
+Rollback candidate: previous stable release.`;
+
 function App() {
   const [serviceName, setServiceName] = useState("checkout-api");
   const [alertDescription, setAlertDescription] = useState(
@@ -174,6 +226,10 @@ function App() {
   const [timeWindow, setTimeWindow] = useState("2026-06-18T10:20:00Z/2026-06-18T10:30:00Z");
   const [rawLogs, setRawLogs] = useState(sampleLogs);
   const [metricsJson, setMetricsJson] = useState(sampleMetrics);
+  const [changeDescription, setChangeDescription] = useState(sampleChange);
+  const [investigationNotes, setInvestigationNotes] = useState(
+    "On-call noted database wait time increased after the latest release.",
+  );
   const [activeTab, setActiveTab] = useState<TabKey>("report");
   const [result, setResult] = useState<IncidentResult | null>(null);
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
@@ -183,6 +239,12 @@ function App() {
   const [feedbackResult, setFeedbackResult] = useState<FeedbackResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isSavingFeedback, setIsSavingFeedback] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authContext, setAuthContext] = useState<AuthContext | null>(null);
+  const [tenantIdInput, setTenantIdInput] = useState("");
+  const [emailInput, setEmailInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const nodeEnds = useMemo(
@@ -191,26 +253,142 @@ function App() {
   );
 
   useEffect(() => {
-    fetch(`${API_BASE}/llm/status`)
+    apiFetch("/llm/status")
       .then((response) => (response.ok ? response.json() : null))
       .then((payload: LLMStatus | null) => setLlmStatus(payload))
       .catch(() => setLlmStatus(null));
-    void loadHistory();
+    void bootstrapAuth();
   }, []);
 
+  async function bootstrapAuth() {
+    try {
+      const response = await apiFetch("/auth/me");
+      if (!response.ok) {
+        if (!STATIC_API_TOKEN) {
+          setStoredToken(null);
+        }
+        setAuthContext(null);
+        return;
+      }
+      const payload = (await response.json()) as AuthContext;
+      setAuthContext(payload);
+      await loadHistory();
+    } catch {
+      setAuthContext(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
   async function loadHistory() {
-    const response = await fetch(`${API_BASE}/incidents`);
+    const response = await apiFetch("/incidents");
     if (response.ok) {
       setHistory((await response.json()) as IncidentSummary[]);
     }
+  }
+
+  async function login() {
+    setIsSigningIn(true);
+    setError(null);
+    try {
+      const response = await apiFetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: tenantIdInput,
+          email: emailInput,
+          password: passwordInput,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`HTTP ${response.status}: ${body.slice(0, 240)}`);
+      }
+      const payload = (await response.json()) as { access_token: string; auth_context: AuthContext };
+      if (!STATIC_API_TOKEN) {
+        setStoredToken(payload.access_token);
+      }
+      setAuthContext(payload.auth_context);
+      setPasswordInput("");
+      await loadHistory();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Unable to sign in");
+    } finally {
+      setIsSigningIn(false);
+      setAuthLoading(false);
+    }
+  }
+
+  async function logout() {
+    if (!STATIC_API_TOKEN) {
+      await apiFetch("/auth/logout", { method: "POST" }).catch(() => null);
+      setStoredToken(null);
+    }
+    setAuthContext(null);
+    setHistory([]);
+    setResult(null);
+  }
+
+  if (authLoading) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <RefreshCw className="spin" size={20} />
+          <strong>Loading workspace</strong>
+        </section>
+      </main>
+    );
+  }
+
+  if (!authContext) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card">
+          <div className="panel-heading">
+            <ShieldCheck size={18} />
+            <h2>Tenant Sign In</h2>
+          </div>
+          <label>
+            <span>Tenant ID</span>
+            <input value={tenantIdInput} onChange={(event) => setTenantIdInput(event.target.value)} />
+          </label>
+          <label>
+            <span>Email</span>
+            <input value={emailInput} onChange={(event) => setEmailInput(event.target.value)} />
+          </label>
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(event) => setPasswordInput(event.target.value)}
+            />
+          </label>
+          <button className="primary-button auth-button" onClick={login} disabled={isSigningIn} type="button">
+            {isSigningIn ? <RefreshCw className="spin" size={18} /> : <Lock size={18} />}
+            <span>{isSigningIn ? "Signing In" : "Sign In"}</span>
+          </button>
+          {error ? <div className="error-strip">{error}</div> : null}
+        </section>
+      </main>
+    );
   }
 
   async function runAnalysis() {
     setIsRunning(true);
     setError(null);
     try {
-      const metrics = JSON.parse(metricsJson);
-      const response = await fetch(`${API_BASE}/incidents/run`, {
+      const metrics = metricsJson.trim() ? JSON.parse(metricsJson) : {};
+      const hasIncidentEvidence = [
+        alertDescription,
+        rawLogs,
+        changeDescription,
+        investigationNotes,
+      ].some((value) => value.trim().length > 0) || Object.keys(metrics).length > 0;
+      if (!hasIncidentEvidence) {
+        throw new Error("Fill at least one incident evidence window before running analysis.");
+      }
+      const response = await apiFetch("/incidents/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -218,6 +396,8 @@ function App() {
           alert_description: alertDescription,
           raw_logs: rawLogs,
           metrics,
+          change_description: changeDescription,
+          investigation_notes: investigationNotes,
           time_window: timeWindow,
         }),
       });
@@ -237,7 +417,7 @@ function App() {
   }
 
   async function loadIncident(incidentId: string) {
-    const response = await fetch(`${API_BASE}/incidents/${incidentId}`);
+    const response = await apiFetch(`/incidents/${incidentId}`);
     if (!response.ok) {
       setError(`Unable to load incident ${incidentId}`);
       return;
@@ -248,7 +428,7 @@ function App() {
 
   async function submitApproval(action: "approve" | "reject") {
     if (!result) return;
-    const response = await fetch(`${API_BASE}/incidents/${result.incident_id}/${action}`, {
+    const response = await apiFetch(`/incidents/${result.incident_id}/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ approved_by: "local-user", note: approvalNote }),
@@ -269,7 +449,7 @@ function App() {
     setIsSavingFeedback(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE}/feedback/ingest`, {
+      const response = await apiFetch("/feedback/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -299,10 +479,18 @@ function App() {
           <div className="subline">
             <span>{result?.incident_id ?? "No incident run"}</span>
             <span>{result?.trace_id ?? "trace pending"}</span>
+            <span>{authContext.tenant_name ?? authContext.tenant_id ?? authContext.actor_type}</span>
+            <span>{authContext.email ?? authContext.actor_id}</span>
           </div>
         </div>
         <div className="topbar-actions">
           <StatusPill label={result?.workflow_status ?? "idle"} tone={result ? "ok" : "muted"} />
+          {!STATIC_API_TOKEN ? (
+            <button className="secondary-button" onClick={logout} type="button" title="Sign out">
+              <Lock size={16} />
+              <span>Sign Out</span>
+            </button>
+          ) : null}
           <button className="primary-button" onClick={runAnalysis} disabled={isRunning} title="Run analysis">
             {isRunning ? <RefreshCw className="spin" size={18} /> : <Play size={18} />}
             <span>{isRunning ? "Running" : "Run"}</span>
@@ -339,6 +527,20 @@ function App() {
           <label>
             <span>Metrics JSON</span>
             <textarea value={metricsJson} onChange={(event) => setMetricsJson(event.target.value)} />
+          </label>
+          <label>
+            <span>Change / Deployment</span>
+            <textarea
+              value={changeDescription}
+              onChange={(event) => setChangeDescription(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Investigation Notes</span>
+            <textarea
+              value={investigationNotes}
+              onChange={(event) => setInvestigationNotes(event.target.value)}
+            />
           </label>
           <section className="feedback-panel">
             <div className="panel-heading">
@@ -579,16 +781,16 @@ function EvalView({ result }: { result: IncidentResult }) {
 }
 
 function EvidenceView({ result }: { result: IncidentResult }) {
-  const tools = result.tool_context;
+  const evidence = result.evidence_context;
   return (
-    <div className="tools-layout">
+    <div className="evidence-layout">
       <section className="section-block wide">
         <h3>Metric Evidence</h3>
-        <ToolSource value={tools?.tool_sources.metrics} />
-        <div className="tool-list">
-          {(tools?.metric_findings.length ? tools.metric_findings : []).map((item) => (
-            <article className="tool-item" key={item.metric_name}>
-              <div className="tool-head">
+        <EvidenceSource value={evidence?.evidence_sources.metrics} />
+        <div className="evidence-list">
+          {(evidence?.metric_findings.length ? evidence.metric_findings : []).map((item) => (
+            <article className="evidence-item" key={item.metric_name}>
+              <div className="evidence-head">
                 <strong><Gauge size={15} /> {item.metric_name}</strong>
                 <StatusPill label={item.severity} tone={item.severity === "high" ? "warn" : "muted"} />
               </div>
@@ -596,44 +798,44 @@ function EvidenceView({ result }: { result: IncidentResult }) {
               <code>{item.query}</code>
             </article>
           ))}
-          {!tools?.metric_findings.length ? <span className="history-empty">No metric evidence</span> : null}
+          {!evidence?.metric_findings.length ? <span className="history-empty">No metric evidence</span> : null}
         </div>
       </section>
       <section className="section-block">
         <h3>Log Evidence</h3>
-        <ToolSource value={tools?.tool_sources.logs} />
-        <div className="tool-list">
-          {(tools?.log_search_hits.length ? tools.log_search_hits : []).map((item) => (
-            <article className="tool-item compact" key={`${item.timestamp}-${item.message}`}>
+        <EvidenceSource value={evidence?.evidence_sources.logs} />
+        <div className="evidence-list">
+          {(evidence?.log_evidence_hits.length ? evidence.log_evidence_hits : []).map((item) => (
+            <article className="evidence-item compact" key={`${item.timestamp}-${item.message}`}>
               <strong><Search size={15} /> {item.level}</strong>
               <p>{item.message}</p>
               <span>{item.source} · {item.matched_terms.join(", ") || "no matched term"}</span>
             </article>
           ))}
-          {!tools?.log_search_hits.length ? <span className="history-empty">No log search hits</span> : null}
+          {!evidence?.log_evidence_hits.length ? <span className="history-empty">No log evidence hits</span> : null}
         </div>
       </section>
       <section className="section-block">
         <h3>Deployment Clues</h3>
-        <ToolSource value={tools?.tool_sources.deployment} />
-        <div className="tool-list">
-          {(tools?.deployment_events.length ? tools.deployment_events : []).map((item) => (
-            <article className="tool-item compact" key={item.commit_sha}>
+        <EvidenceSource value={evidence?.evidence_sources.deployment} />
+        <div className="evidence-list">
+          {(evidence?.deployment_events.length ? evidence.deployment_events : []).map((item) => (
+            <article className="evidence-item compact" key={item.commit_sha}>
               <strong><GitBranch size={15} /> {item.version}</strong>
               <p>{item.summary}</p>
               <span>{item.deployed_at} · {item.risk_flags.join(", ") || "no risk flag"}</span>
             </article>
           ))}
-          {!tools?.deployment_events.length ? <span className="history-empty">No deployment events</span> : null}
+          {!evidence?.deployment_events.length ? <span className="history-empty">No deployment events</span> : null}
         </div>
       </section>
-      {tools?.tool_errors.length ? <ListBlock title="Tool Errors" items={tools.tool_errors} /> : null}
+      {evidence?.evidence_errors.length ? <ListBlock title="Evidence Errors" items={evidence.evidence_errors} /> : null}
     </div>
   );
 }
 
-function ToolSource({ value }: { value?: string }) {
-  return <span className="tool-source">source: {value ?? "unknown"}</span>;
+function EvidenceSource({ value }: { value?: string }) {
+  return <span className="evidence-source">source: {value ?? "unknown"}</span>;
 }
 
 function LLMView({ result, status }: { result: IncidentResult | null; status: LLMStatus | null }) {

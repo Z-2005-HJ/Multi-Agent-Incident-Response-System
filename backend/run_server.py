@@ -13,9 +13,9 @@ logging.basicConfig(
 
 
 if __name__ == "__main__":
-    logging.info("Starting uvicorn server on 127.0.0.1:8000")
+    logging.info("Starting uvicorn server on 0.0.0.0:8000")
     try:
-        uvicorn.run("app.main:app", host="127.0.0.1", port=8000, log_level="info", log_config=None)
+        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, log_level="info", log_config=None)
     except Exception:
         logging.exception("Server failed to start")
         raise

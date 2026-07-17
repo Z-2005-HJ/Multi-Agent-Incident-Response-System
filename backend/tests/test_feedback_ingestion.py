@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 from pathlib import Path
-from uuid import uuid4
 
 from app.agents.feedback_ingestion_agent import ingest_manual_feedback
 from app.schemas.incident import ManualFeedbackRequest
 
 
 def test_manual_feedback_ingestion_writes_sanitized_docs_and_knowledge() -> None:
-    workspace_tmp = Path(__file__).resolve().parents[2] / ".test-data" / f"feedback_{uuid4().hex}"
+    workspace_tmp = Path(tempfile.mkdtemp(prefix="feedback_ingestion_"))
     docs_path = workspace_tmp / "docs"
     knowledge_file = workspace_tmp / "knowledge" / "manual_feedback.json"
     try:

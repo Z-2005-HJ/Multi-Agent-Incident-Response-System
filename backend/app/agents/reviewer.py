@@ -38,6 +38,7 @@ def review_with_metadata(
         return review_rule(root_cause_analysis, fix_plan), {
             "execution_mode": "rule_fallback",
             "fallback_reason": str(exc),
+            **llm_error_metadata,
             "llm_error_type": llm_error_metadata.get("llm_error_type") or exc.__class__.__name__,
             "privacy_mode": get_llm_settings().privacy_mode,
             "prompt_version": prompt_version("reviewer.md"),

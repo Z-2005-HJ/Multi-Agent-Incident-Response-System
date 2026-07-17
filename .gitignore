@@ -7,10 +7,10 @@ __pycache__/
 .pytest_cache/
 *.pyc
 backend/server.log
-backend/data/incidents.db
 backend/data/chroma/
 backend/data/knowledge_base/manual_feedback.json
 docs/feedback/*.md
 !docs/feedback/.gitkeep
 frontend/node_modules/
 frontend/dist/
+ops/artifacts/

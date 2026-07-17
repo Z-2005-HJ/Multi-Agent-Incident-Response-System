@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def utc_now() -> datetime:
@@ -12,12 +13,31 @@ def utc_now() -> datetime:
 
 
 class IncidentRequest(BaseModel):
-    incident_id: str = Field(default_factory=lambda: f"inc_{uuid4().hex[:12]}")
-    service_name: str = "checkout-api"
-    alert_description: str
-    raw_logs: str = ""
+    incident_id: str = Field(default_factory=lambda: f"inc_{uuid4().hex[:12]}", max_length=128)
+    service_name: str = Field(default="checkout-api", max_length=120)
+    alert_description: str = Field(default="", max_length=4000)
+    raw_logs: str = Field(default="", max_length=200_000)
     metrics: dict[str, Any] = Field(default_factory=dict)
-    time_window: str | None = None
+    change_description: str = Field(default="", max_length=8000)
+    investigation_notes: str = Field(default="", max_length=12000)
+    time_window: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def require_some_incident_evidence(self) -> "IncidentRequest":
+        has_text = any(
+            value.strip()
+            for value in (
+                self.alert_description,
+                self.raw_logs,
+                self.change_description,
+                self.investigation_notes,
+            )
+        )
+        if not has_text and not self.metrics:
+            raise ValueError("At least one incident evidence field must be provided.")
+        if len(json.dumps(self.metrics, ensure_ascii=False)) > 200_000:
+            raise ValueError("Metrics payload is too large.")
+        return self
 
 
 class LogAnalysis(BaseModel):
@@ -43,6 +63,13 @@ class MetricAnalysis(BaseModel):
     timeline: list[str] = Field(default_factory=list)
     suspected_bottlenecks: list[str] = Field(default_factory=list)
     metric_confidence: float = 0.0
+
+
+class DeploymentAnalysis(BaseModel):
+    deployment_events: list["DeploymentEvent"] = Field(default_factory=list)
+    change_summary: str = ""
+    risk_flags: list[str] = Field(default_factory=list)
+    deployment_confidence: float = 0.0
 
 
 class RetrievedCase(BaseModel):
@@ -72,9 +99,9 @@ class MetricEvidence(BaseModel):
     summary: str
 
 
-class LogSearchHit(BaseModel):
+class LogEvidenceHit(BaseModel):
     timestamp: str | None = None
-    source: Literal["manual", "elasticsearch", "loki"] = "manual"
+    source: Literal["manual"] = "manual"
     level: Literal["INFO", "WARN", "ERROR", "CRITICAL", "UNKNOWN"] = "UNKNOWN"
     message: str
     matched_terms: list[str] = Field(default_factory=list)
@@ -91,16 +118,16 @@ class DeploymentEvent(BaseModel):
     risk_flags: list[str] = Field(default_factory=list)
 
 
-class ExternalToolContext(BaseModel):
+class ManualEvidenceContext(BaseModel):
     metric_findings: list[MetricEvidence] = Field(default_factory=list)
-    log_search_hits: list[LogSearchHit] = Field(default_factory=list)
+    log_evidence_hits: list[LogEvidenceHit] = Field(default_factory=list)
     deployment_events: list[DeploymentEvent] = Field(default_factory=list)
-    tool_sources: dict[str, str] = Field(default_factory=dict)
-    tool_errors: list[str] = Field(default_factory=list)
+    evidence_sources: dict[str, str] = Field(default_factory=dict)
+    evidence_errors: list[str] = Field(default_factory=list)
 
 
 class RootCauseHypothesis(BaseModel):
-    cause: str
+    cause: str = Field(max_length=2000)
     status: Literal["confirmed", "likely", "possible"] = "possible"
     confidence: float = 0.0
     evidence: list[str] = Field(default_factory=list)
@@ -157,8 +184,12 @@ class TraceEvent(BaseModel):
     input_snapshot: dict[str, Any] = Field(default_factory=dict)
     output_snapshot: dict[str, Any] = Field(default_factory=dict)
     state_diff: dict[str, Any] = Field(default_factory=dict)
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    evidence_observations: list[dict[str, Any]] = Field(default_factory=list)
     error: str | None = None
+    error_category: str | None = None
+    retryable: bool | None = None
+    attempt: int = 1
+    checkpoint_id: str | None = None
     duration_ms: int = 0
     execution_mode: Literal["rule", "llm", "rule_fallback", "system"] | None = None
     fallback_reason: str | None = None
@@ -191,7 +222,7 @@ class IncidentRunResult(BaseModel):
     markdown_report: str
     eval_report: EvalReport
     trace_events: list[TraceEvent]
-    tool_context: ExternalToolContext | None = None
+    evidence_context: ManualEvidenceContext | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -206,9 +237,46 @@ class IncidentRunSummary(BaseModel):
     created_at: str | None = None
 
 
-class HumanApprovalRequest(BaseModel):
-    approved_by: str = "local-user"
+class IncidentRunAccepted(BaseModel):
+    job_id: str
+    incident_id: str
+    status: Literal["queued", "retry_scheduled"]
+    queue_name: str
+    max_retries: int
+
+
+class WorkflowJobStatus(BaseModel):
+    job_id: str
+    incident_id: str
+    tenant_id: str | None = None
+    status: Literal["queued", "running", "recovering", "awaiting_human", "retry_scheduled", "completed", "failed", "dead_letter"]
+    attempts: int = 0
+    max_retries: int = 0
+    queue_name: str
+    trace_id: str | None = None
+    run_id: str | None = None
+    current_node: str | None = None
+    completed_nodes: list[str] = Field(default_factory=list)
+    checkpoint_id: str | None = None
+    last_error: str | None = None
+    last_error_category: str | None = None
+    next_retry_at: str | None = None
+    dead_letter_reason: str | None = None
+    human_action_required: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    completed_at: str | None = None
+
+
+class WorkflowResumeRequest(BaseModel):
+    action: Literal["resume", "recover", "approve", "reject"] = "resume"
+    approved_by: str = "ops-user"
     note: str = ""
+
+
+class HumanApprovalRequest(BaseModel):
+    approved_by: str = Field(default="local-user", min_length=2, max_length=120)
+    note: str = Field(default="", max_length=4000)
 
 
 class HumanApprovalResult(BaseModel):
@@ -220,8 +288,8 @@ class HumanApprovalResult(BaseModel):
 
 
 class ManualFeedbackRequest(BaseModel):
-    raw_content: str
-    source_name: str = "manual_upload"
+    raw_content: str = Field(min_length=1, max_length=200_000)
+    source_name: str = Field(default="manual_upload", min_length=2, max_length=120)
     feedback_type: Literal[
         "error_log",
         "metric_snapshot",
@@ -230,8 +298,8 @@ class ManualFeedbackRequest(BaseModel):
         "deployment_note",
         "unknown",
     ] | None = None
-    title: str | None = None
-    note: str = ""
+    title: str | None = Field(default=None, max_length=240)
+    note: str = Field(default="", max_length=4000)
 
 
 class StructuredFeedbackDocument(BaseModel):
