@@ -246,6 +246,8 @@ Copy-Item ops/compose/mairs.env.example ops/compose/mairs.env
 
 每个 Docker 项目必须使用不同的 Compose 项目名和主机端口。当前项目的隔离
 配置、端口分配和管理命令见 [ops/compose/README.md](ops/compose/README.md)。
+日常启动使用 `-Action start`；只有修改源代码、依赖或 Dockerfile 后才使用
+`-Action rebuild`。
 
 服务端口：
 

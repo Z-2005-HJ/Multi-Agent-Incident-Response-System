@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("start", "stop", "status", "logs")]
+    [ValidateSet("start", "rebuild", "stop", "status", "logs")]
     [string]$Action = "status",
     [string]$ProjectName = "",
     [string]$EnvFile = "ops/compose/mairs.env",
@@ -38,8 +38,17 @@ function Get-ComposeCommand {
     throw "docker-compose was not found. Install Docker Desktop with Compose support before using this script."
 }
 
+function Get-DockerCommand {
+    $command = Get-Command docker -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+    throw "docker was not found. Install Docker Desktop before using this script."
+}
+
 Import-ComposeEnvironment -Path $envPath
 $compose = Get-ComposeCommand
+$docker = Get-DockerCommand
 $resolvedProjectName = $ProjectName
 if (-not $resolvedProjectName) {
     $resolvedProjectName = $env:COMPOSE_PROJECT_NAME
@@ -47,11 +56,29 @@ if (-not $resolvedProjectName) {
 if (-not $resolvedProjectName) {
     $resolvedProjectName = "mairs"
 }
+$persistentServices = @("postgres", "redis", "backend", "worker", "frontend", "prometheus", "alertmanager", "grafana")
 
 Push-Location $projectRoot
 try {
     switch ($Action) {
-        "start"  { & $compose -p $resolvedProjectName up --build --detach @Service }
+        "start"   {
+            $existingContainers = @(& $compose -p $resolvedProjectName ps --all --quiet)
+            $servicesToStart = if ($Service.Count) { $Service } else { $persistentServices }
+            if ($existingContainers.Count) {
+                $containerIds = @(
+                    foreach ($serviceName in $servicesToStart) {
+                        & $compose -p $resolvedProjectName ps --quiet $serviceName
+                    }
+                ) | Where-Object { $_ }
+                if ($containerIds.Count) {
+                    & $docker start $containerIds
+                }
+            }
+            else {
+                & $compose -p $resolvedProjectName up --detach @servicesToStart
+            }
+        }
+        "rebuild" { & $compose -p $resolvedProjectName up --build --detach @Service }
         "stop"   {
             if ($Service.Count) {
                 throw "-Service is not supported with stop. Use stop without -Service to remove only this isolated stack."

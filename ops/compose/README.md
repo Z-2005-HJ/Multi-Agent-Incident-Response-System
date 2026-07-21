@@ -26,8 +26,12 @@ other Docker projects.
 ## Commands
 
 ```powershell
-# Build and start this stack.
+# Start existing long-running containers without rebuilding images or rerunning migrations.
+# On a new machine, this command initializes the stack once.
 .\ops\docker-stack.ps1 -Action start
+
+# Rebuild images after changing application dependencies, a Dockerfile, or frontend/backend source.
+.\ops\docker-stack.ps1 -Action rebuild
 
 # Show only this stack's containers.
 .\ops\docker-stack.ps1 -Action status
