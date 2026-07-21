@@ -2,34 +2,23 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.runtime import DEFAULT_DATABASE_URL
 
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
-def _postgres_is_available() -> bool:
-    database_url = os.getenv("APP_DATABASE_URL", DEFAULT_DATABASE_URL)
-    parsed = urlparse(database_url)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 5432
-    try:
-        with socket.create_connection((host, port), timeout=1):
-            return True
-    except OSError:
-        return False
-
-
-if not _postgres_is_available():
-    pytest.skip("PostgreSQL is required for API integration tests.", allow_module_level=True)
+if os.getenv("RUN_API_INTEGRATION_TESTS") != "1":
+    pytest.skip(
+        "API integration tests require an explicitly configured isolated PostgreSQL instance. "
+        "Set RUN_API_INTEGRATION_TESTS=1 to run them.",
+        allow_module_level=True,
+    )
 
 
 def incident_payload(incident_id: str) -> dict[str, object]:
@@ -575,7 +564,7 @@ def test_job_human_intervention_can_be_approved(monkeypatch) -> None:
             trace_id=run_payload["trace_id"],
             run_id="inc_hitl",
             current_node="final_report",
-            completed_nodes=["ingest_incident", "log_analysis", "metric_analysis", "deployment_analysis", "knowledge_retrieval", "root_cause_analysis", "fix_planning", "review", "final_report", "eval_report"],
+            completed_nodes=["ingest_incident", "evidence_analysis", "knowledge_retrieval", "root_cause_analysis", "fix_planning", "review", "final_report", "eval_report"],
             checkpoint_id="ckpt_test_hitl",
             checkpoint={"incident_id": "inc_hitl"},
             human_action_required={"kind": "approval_required", "node_name": "final_report"},
@@ -633,7 +622,7 @@ def test_failed_job_can_be_recovered_and_requeued(monkeypatch) -> None:
             store.save_job_checkpoint(
                 job_id,
                 current_node="knowledge_retrieval",
-                completed_nodes=["ingest_incident", "log_analysis", "metric_analysis", "deployment_analysis"],
+                completed_nodes=["ingest_incident", "evidence_analysis"],
                 checkpoint_id="ckpt_recover",
                 checkpoint={"incident_id": "inc_recover", "completed_nodes": ["ingest_incident"]},
             )

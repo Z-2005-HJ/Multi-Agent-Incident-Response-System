@@ -1,2 +1,1 @@
-"""LangGraph workflow definitions."""
-
+"""Workflow definitions and state models."""

@@ -27,6 +27,7 @@ def state_snapshot(state: IncidentState) -> dict[str, Any]:
         "status",
         "current_node",
         "completed_nodes",
+        "evidence_analysis",
         "log_analysis",
         "metric_analysis",
         "deployment_analysis",

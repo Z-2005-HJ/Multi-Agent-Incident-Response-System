@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-incident_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-incident_password}
     ports:
-      - "5432:5432"
+      - "${MAIRS_POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     image: redis:7.4-alpine
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-incident-redis-password}"]
     ports:
-      - "6379:6379"
+      - "${MAIRS_REDIS_PORT:-16379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -62,7 +62,7 @@ services:
       APP_RATE_LIMIT_REQUESTS: ${APP_RATE_LIMIT_REQUESTS:-300}
       APP_RATE_LIMIT_WINDOW_SECONDS: ${APP_RATE_LIMIT_WINDOW_SECONDS:-60}
     ports:
-      - "8000:8000"
+      - "${MAIRS_BACKEND_PORT:-18000}:8000"
     volumes:
       - ./backend/data:/app/data
     depends_on:
@@ -115,7 +115,7 @@ services:
         VITE_API_TOKEN: ${VITE_API_TOKEN:-}
         VITE_RELEASE_APPROVAL_ID: ${VITE_RELEASE_APPROVAL_ID:-}
     ports:
-      - "5173:80"
+      - "${MAIRS_FRONTEND_PORT:-15173}:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -126,7 +126,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
     ports:
-      - "9090:9090"
+      - "${MAIRS_PROMETHEUS_PORT:-19090}:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
@@ -141,7 +141,7 @@ services:
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
     ports:
-      - "9093:9093"
+      - "${MAIRS_ALERTMANAGER_PORT:-19093}:9093"
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     depends_on:
@@ -154,7 +154,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3000:3000"
+      - "${MAIRS_GRAFANA_PORT:-13000}:3000"
     volumes:
       - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro

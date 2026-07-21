@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 from app.schemas.incident import (
     EvalReport,
     DeploymentAnalysis,
+    EvidenceAnalysis,
     FixPlan,
     IncidentReport,
     IncidentRequest,
@@ -27,6 +28,7 @@ class IncidentState(TypedDict, total=False):
     pending_human_input: dict[str, Any]
     node_attempts: dict[str, int]
     request: IncidentRequest
+    evidence_analysis: EvidenceAnalysis
     log_analysis: LogAnalysis
     metric_analysis: MetricAnalysis
     deployment_analysis: DeploymentAnalysis

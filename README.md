@@ -1,5 +1,38 @@
 # Multi-Agent Incident Response System
 
+## Project Snapshot
+
+Multi-Agent Incident Response System turns manually supplied incident evidence
+into a traceable investigation: normalized signals, related knowledge, root
+cause hypotheses, remediation guidance, risk review, and an exportable report.
+It is designed for demonstrations, internal engineering workflows, and
+iterative incident-analysis experiments.
+
+The system deliberately does **not** connect to production infrastructure,
+execute remediation commands, or make changes outside its own data store.
+Operators remain responsible for validating every recommendation and approving
+high-risk plans.
+
+**Highlights**
+
+- Evidence analysis for logs, metrics, and deployment clues
+- Local vector retrieval with a keyword fallback and no embedding API required
+- Rule-based operation by default, with optional OpenAI-compatible LLM agents
+- Persistent incident history, traces, asynchronous jobs, retries, and DLQ
+- Tenant API keys, interactive user roles, quotas, audit events, and release gates
+- React console, Prometheus metrics, Grafana dashboard, alert rules, and runbooks
+
+For an isolated Docker demo, copy `backend/.env.example` to `backend/.env`,
+copy `ops/compose/mairs.env.example` to `ops/compose/mairs.env`, then run:
+
+```powershell
+.\ops\docker-stack.ps1 -Action start
+```
+
+Open `http://127.0.0.1:15173`. See [ops/compose/README.md](ops/compose/README.md)
+for assigned ports, and [DEPLOYMENT.md](DEPLOYMENT.md) for operations,
+production configuration, and recovery guidance.
+
 一个面向 SRE / 后端 / 平台工程场景的多 Agent 故障响应系统。
 
 当前项目聚焦于**手动上传故障材料后的本地智能分析**：用户提供告警、日志、指标、系统反馈或排障记录，系统通过多 Agent workflow 完成证据提取、历史知识检索、根因推断、修复建议、风险审核和报告生成。
@@ -11,7 +44,7 @@
 当前版本已经实现：
 
 - FastAPI 后端服务
-- LangGraph 多 Agent 工作流
+- 可检查点恢复的多 Agent 工作流
 - React + Vite + TypeScript 前端控制台
 - OpenAI-compatible LLM 接入，支持正规模型厂商和 API 中转站
 - LLM mock / fallback，未配置模型时仍可完整运行
@@ -31,12 +64,10 @@
 ```mermaid
 flowchart LR
     A["Manual Incident Input"] --> B["FastAPI API"]
-    B --> C["LangGraph Workflow"]
+    B --> C["Checkpointed Workflow"]
 
-    C --> D["Log Analyst"]
-    D --> E["Metric Analyst"]
-    E --> F["Manual Evidence Extractor"]
-    F --> G["Knowledge Agent"]
+    C --> D["Evidence Analyst"]
+    D --> G["Knowledge Agent"]
     G --> H["Root Cause Agent"]
     H --> I["Fix Planner"]
     I --> J["Reviewer"]
@@ -65,9 +96,7 @@ flowchart LR
 
 | Agent | 作用 | 主要输出 |
 | --- | --- | --- |
-| Log Analyst | 从手动输入日志中提取错误模式、关键日志、疑似组件和时间线 | `LogAnalysis` |
-| Metric Analyst | 从手动输入指标中分析错误率、延迟、连接池等异常 | `MetricAnalysis` |
-| Manual Evidence Extractor | 从手动输入的 logs / metrics / alert 中提取本地证据 | `ExternalToolContext` |
+| Evidence Analyst | 统一分析日志、指标和发布线索，并生成标准化证据上下文 | `EvidenceAnalysis`、`ManualEvidenceContext` |
 | Knowledge Agent | 通过 Chroma RAG 检索历史 incident、runbook、manual feedback | `KnowledgeResults` |
 | Root Cause Agent | 综合日志、指标、本地证据、知识库结果推断根因 | `RootCauseAnalysis` |
 | Fix Planner | 生成诊断步骤、修复建议、回滚计划、验证步骤 | `FixPlan` |
@@ -81,7 +110,7 @@ flowchart LR
 
 - Python 3.11+
 - FastAPI
-- LangGraph
+- Checkpointed multi-agent workflow
 - Pydantic v2
 - httpx
 - ChromaDB
@@ -112,7 +141,7 @@ flowchart LR
 │   │   ├── agents/          # Agent 实现
 │   │   ├── api/             # FastAPI routes
 │   │   ├── eval/            # tracing & evaluation 逻辑
-│   │   ├── graph/           # LangGraph workflow 和 state
+│   │   ├── graph/           # workflow 和 state
 │   │   ├── knowledge/       # Chroma RAG、embedding、keyword fallback
 │   │   ├── llm/             # OpenAI-compatible LLM client
 │   │   ├── observability.py # Prometheus metrics 与 observability helpers
@@ -207,20 +236,25 @@ npm run dev
 http://127.0.0.1:5173
 ```
 
-### 5. 使用 Docker Compose
+### 5. 使用隔离的 Docker Compose Stack
 
 ```powershell
-docker-compose up --build
+Copy-Item backend/.env.example backend/.env
+Copy-Item ops/compose/mairs.env.example ops/compose/mairs.env
+.\ops\docker-stack.ps1 -Action start
 ```
+
+每个 Docker 项目必须使用不同的 Compose 项目名和主机端口。当前项目的隔离
+配置、端口分配和管理命令见 [ops/compose/README.md](ops/compose/README.md)。
 
 服务端口：
 
-- Backend: `http://127.0.0.1:8000`
-- Frontend: `http://127.0.0.1:5173`
-- PostgreSQL: `127.0.0.1:5432`
-- Redis: `127.0.0.1:6379`
-- Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000`
+- Backend: `http://127.0.0.1:18000`
+- Frontend: `http://127.0.0.1:15173`
+- PostgreSQL: `127.0.0.1:15432`
+- Redis: `127.0.0.1:16379`
+- Prometheus: `http://127.0.0.1:19090`
+- Grafana: `http://127.0.0.1:13000`
 
 Grafana 默认账号：
 
@@ -480,7 +514,8 @@ cd backend
 
 说明：
 - workflow 测试可在无数据库的情况下运行
-- API 集成测试需要可访问的 PostgreSQL；若本机未启动 PostgreSQL，会自动跳过
+- API 集成测试默认跳过，避免误连本机其他 Docker 项目的数据库
+- 仅在隔离的测试数据库中设置 `RUN_API_INTEGRATION_TESTS=1` 后运行 API 集成测试
 
 运行前端构建：
 
@@ -520,17 +555,14 @@ npm run build
 
 ## 当前边界
 
-这是一个面向学习、展示和迭代的工程型 MVP，不是生产可直接上线的事故处置平台。
+这是一个面向学习、展示和迭代的工程型项目；生产部署前仍需要完成组织级安全、运维和合规验证。
 
 当前未做：
 
 - 自动进入真实系统排查
-- 认证和权限
-- 多租户隔离
 - 生产级日志脱敏
 - prompt injection 防护
 - 工具调用 allowlist / policy engine
-- CI/CD
 - 云部署
 - 通知系统
 - 自动创建 Jira / GitHub issue
@@ -540,13 +572,11 @@ npm run build
 
 如果继续迭代，优先级建议如下：
 
-1. 增加 `.env.example`，降低新环境启动成本
-2. 增加 GitHub Actions，自动跑 pytest 和 frontend build
-3. 增加更完整的日志脱敏和 prompt injection 防护
-4. 增加 Slack / 飞书通知
-5. 增加 LLM-as-judge 或离线评估集
-6. 增加多服务依赖图和影响范围分析
-7. 增加 postmortem 自动生成
+1. 增加更完整的日志脱敏和 prompt injection 防护
+2. 增加 Slack / 飞书通知
+3. 增加 LLM-as-judge 或离线评估集
+4. 增加多服务依赖图和影响范围分析
+5. 增加 postmortem 自动生成
 
 ## License
 

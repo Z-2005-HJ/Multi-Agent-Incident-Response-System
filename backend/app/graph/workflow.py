@@ -7,11 +7,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from app.agents.deployment_analyst import analyze_deployment_changes
+from app.agents.evidence_analyst import analyze_evidence
 from app.agents.fix_planner import plan_fix_with_metadata
 from app.agents.knowledge_agent import retrieve_knowledge
-from app.agents.log_analyst import analyze_logs
-from app.agents.metric_analyst import analyze_metrics
 from app.agents.reviewer import review_with_metadata
 from app.agents.root_cause_agent import infer_root_cause_with_metadata
 from app.eval.adapter import generate_eval_report, state_snapshot
@@ -20,6 +18,7 @@ from app.observability import record_node_execution, record_workflow_run
 from app.reports.markdown import render_markdown_report
 from app.schemas.incident import (
     DeploymentAnalysis,
+    EvidenceAnalysis,
     EvalReport,
     FixPlan,
     IncidentReport,
@@ -56,6 +55,7 @@ def _jsonable(value: Any) -> Any:
 
 STATE_MODEL_LOADERS: dict[str, Callable[[Any], Any]] = {
     "request": IncidentRequest.model_validate,
+    "evidence_analysis": EvidenceAnalysis.model_validate,
     "log_analysis": LogAnalysis.model_validate,
     "metric_analysis": MetricAnalysis.model_validate,
     "deployment_analysis": DeploymentAnalysis.model_validate,
@@ -104,28 +104,22 @@ def ingest_node(state: IncidentState) -> dict[str, Any]:
     }
 
 
-def log_node(state: IncidentState) -> dict[str, Any]:
-    log_analysis = analyze_logs(state["request"])
+def evidence_node(state: IncidentState) -> dict[str, Any]:
+    evidence_analysis = analyze_evidence(state["request"])
     evidence_context = _evidence_context(state)
+    log_analysis = evidence_analysis.log_analysis
+    metric_analysis = evidence_analysis.metric_analysis
+    deployment_analysis = evidence_analysis.deployment_analysis
     evidence_context.log_evidence_hits = derive_log_hits(state["request"])
-    evidence_context.evidence_sources["logs"] = "logs_window"
-    return {"log_analysis": log_analysis, "evidence_context": evidence_context, "metadata": _evidence_metadata(state, evidence_context)}
-
-
-def metric_node(state: IncidentState) -> dict[str, Any]:
-    metric_analysis = analyze_metrics(state["request"])
-    evidence_context = _evidence_context(state)
     evidence_context.metric_findings = derive_metric_findings(state["request"])
-    evidence_context.evidence_sources["metrics"] = "metrics_window"
-    return {"metric_analysis": metric_analysis, "evidence_context": evidence_context, "metadata": _evidence_metadata(state, evidence_context)}
-
-
-def deployment_node(state: IncidentState) -> dict[str, Any]:
-    deployment_analysis = analyze_deployment_changes(state["request"])
-    evidence_context = _evidence_context(state)
     evidence_context.deployment_events = deployment_analysis.deployment_events
+    evidence_context.evidence_sources["logs"] = "logs_window"
+    evidence_context.evidence_sources["metrics"] = "metrics_window"
     evidence_context.evidence_sources["deployment"] = "change_window"
     return {
+        "evidence_analysis": evidence_analysis,
+        "log_analysis": log_analysis,
+        "metric_analysis": metric_analysis,
         "deployment_analysis": deployment_analysis,
         "evidence_context": evidence_context,
         "metadata": _evidence_metadata(state, evidence_context),
@@ -303,9 +297,7 @@ def eval_node(state: IncidentState) -> dict[str, Any]:
 
 WORKFLOW_NODES: list[WorkflowNodeSpec] = [
     WorkflowNodeSpec("ingest_incident", "ingest", ingest_node),
-    WorkflowNodeSpec("log_analysis", "log_analyst", log_node),
-    WorkflowNodeSpec("metric_analysis", "metric_analyst", metric_node),
-    WorkflowNodeSpec("deployment_analysis", "deployment_analyst", deployment_node),
+    WorkflowNodeSpec("evidence_analysis", "evidence_analyst", evidence_node),
     WorkflowNodeSpec("knowledge_retrieval", "knowledge_agent", knowledge_node, max_retries=1),
     WorkflowNodeSpec("root_cause_analysis", "root_cause_agent", root_cause_node, max_retries=1),
     WorkflowNodeSpec("fix_planning", "fix_planner", fix_plan_node, max_retries=1),

@@ -38,6 +38,7 @@ jobs:
     env:
       APP_DATABASE_URL: postgresql+asyncpg://incident_user:incident_password@127.0.0.1:5432/incident_response
       APP_REDIS_URL: redis://127.0.0.1:6379/0
+      RUN_API_INTEGRATION_TESTS: "1"
       APP_AUTO_CREATE_SCHEMA: "false"
       APP_ADMIN_API_TOKEN: admin-token
       APP_API_KEY_PEPPER: ci-pepper-value-12345

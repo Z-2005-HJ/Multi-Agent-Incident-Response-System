@@ -48,9 +48,7 @@ def test_trace_contains_all_core_nodes() -> None:
 
     assert {
         "ingest_incident",
-        "log_analysis",
-        "metric_analysis",
-        "deployment_analysis",
+        "evidence_analysis",
         "knowledge_retrieval",
         "root_cause_analysis",
         "fix_planning",
@@ -114,9 +112,9 @@ def test_workflow_failure_is_classified_and_recoverable(monkeypatch) -> None:
         workflow_module,
         "WORKFLOW_NODES",
         [
-            *original_nodes[:4],
+            *original_nodes[:2],
             WorkflowNodeSpec("knowledge_retrieval", "knowledge_agent", flaky_knowledge, max_retries=1),
-            *original_nodes[5:],
+            *original_nodes[3:],
         ],
     )
 

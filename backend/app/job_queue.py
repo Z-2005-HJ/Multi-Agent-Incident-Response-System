@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from redis.asyncio import Redis
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.runtime import get_runtime_settings
 
@@ -78,7 +79,11 @@ class RedisJobQueue:
         await self.promote_due_jobs()
         redis = await self._ensure_client()
         timeout = max(1, int(self.worker_poll_seconds))
-        result = await redis.blpop(self.queue_name, timeout=timeout)
+        try:
+            result = await redis.blpop(self.queue_name, timeout=timeout)
+        except RedisTimeoutError:
+            # redis-py 8 raises on an empty blocking pop instead of returning None.
+            return None
         if not result:
             return None
         _, job_id = result

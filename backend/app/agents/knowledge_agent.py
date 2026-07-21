@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.knowledge.retriever import search_knowledge
-from app.knowledge.vector_store import VectorSearchUnavailable, search_knowledge_vector
+from app.knowledge.vector_store import search_knowledge_vector
 from app.schemas.incident import IncidentRequest, KnowledgeResults, LogAnalysis, MetricAnalysis
 
 
@@ -21,7 +21,7 @@ def retrieve_knowledge(
     retrieval_error = None
     try:
         results = search_knowledge_vector(query)
-    except (VectorSearchUnavailable, Exception) as exc:
+    except Exception as exc:
         retrieval_mode = "keyword_fallback"
         retrieval_error = exc.__class__.__name__
         results = search_knowledge(query)

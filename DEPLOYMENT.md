@@ -109,10 +109,11 @@ The initial Alembic revision lives in:
 
 ## Local Demo Deployment
 
-Run:
+For an isolated local stack, copy `backend/.env.example` to `backend/.env`,
+copy `ops/compose/mairs.env.example` to `ops/compose/mairs.env`, then run:
 
 ```powershell
-docker-compose up --build
+.\ops\docker-stack.ps1 -Action start
 ```
 
 Run explicit migrations with:
@@ -123,15 +124,15 @@ docker-compose run --rm migrate
 
 Services:
 
-- Frontend: `http://127.0.0.1:5173`
-- Backend health: `http://127.0.0.1:8000/health`
-- Backend readiness: `http://127.0.0.1:8000/ready`
-- Backend metrics: `http://127.0.0.1:8000/metrics`
-- PostgreSQL: `127.0.0.1:5432`
-- Redis: `127.0.0.1:6379`
-- Prometheus: `http://127.0.0.1:9090`
-- Alertmanager: `http://127.0.0.1:9093`
-- Grafana: `http://127.0.0.1:3000`
+- Frontend: `http://127.0.0.1:15173`
+- Backend health: `http://127.0.0.1:18000/health`
+- Backend readiness: `http://127.0.0.1:18000/ready`
+- Backend metrics: `http://127.0.0.1:18000/metrics`
+- PostgreSQL: `127.0.0.1:15432`
+- Redis: `127.0.0.1:16379`
+- Prometheus: `http://127.0.0.1:19090`
+- Alertmanager: `http://127.0.0.1:19093`
+- Grafana: `http://127.0.0.1:13000`
 
 Grafana default credentials:
 
@@ -257,8 +258,8 @@ Recommended minimum setup:
 
 ## Still Missing Before Production
 
-- Real end-user authentication and RBAC or SSO/IdP integration
+- SSO/IdP integration and enterprise identity lifecycle controls
 - Centralized log shipping and alert routing to your production tooling
-- Backup/restore drills and DB operational runbooks
-- Formal CI/CD gates for migrations, tests, image signing, and deployment rollout
+- Regular backup/restore drills and evidence of recovery objectives
+- Deployment rollout controls, image signing, and formal release approval ownership
 - Commercial/legal/compliance controls outside the repo itself

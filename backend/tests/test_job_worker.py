@@ -163,7 +163,7 @@ def test_failed_workflow_is_checkpointed_and_retried(monkeypatch) -> None:
         metadata={
             "runtime": {
                 "current_node": "knowledge_retrieval",
-                "completed_nodes": ["ingest_incident", "log_analysis"],
+                "completed_nodes": ["ingest_incident", "evidence_analysis"],
                 "checkpoint_id": "ckpt-retry",
                 "resume_state": {"incident_id": "inc-retry", "current_node": "knowledge_retrieval"},
                 "last_error": "TimeoutError: dependency timed out",

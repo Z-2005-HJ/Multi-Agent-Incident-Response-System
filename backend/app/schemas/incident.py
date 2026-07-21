@@ -72,6 +72,12 @@ class DeploymentAnalysis(BaseModel):
     deployment_confidence: float = 0.0
 
 
+class EvidenceAnalysis(BaseModel):
+    log_analysis: LogAnalysis = Field(default_factory=LogAnalysis)
+    metric_analysis: MetricAnalysis = Field(default_factory=MetricAnalysis)
+    deployment_analysis: DeploymentAnalysis = Field(default_factory=DeploymentAnalysis)
+
+
 class RetrievedCase(BaseModel):
     source_id: str
     title: str
