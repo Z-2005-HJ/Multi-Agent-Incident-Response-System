@@ -94,7 +94,7 @@ class TenantUserCreateRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     full_name: str = Field(min_length=2, max_length=120)
     role: Literal["viewer", "operator", "approver", "admin"] = "operator"
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class TenantUserSummary(BaseModel):
@@ -114,13 +114,13 @@ class TenantUserRoleUpdateRequest(BaseModel):
 
 
 class TenantUserPasswordResetRequest(BaseModel):
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class UserLoginRequest(BaseModel):
     tenant_id: str = Field(min_length=4, max_length=128)
     email: str = Field(min_length=5, max_length=255)
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class AuthSessionResult(BaseModel):
